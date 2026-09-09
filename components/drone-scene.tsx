@@ -11,6 +11,40 @@ const MODEL_URL = '/media/drone/aele-graphite-drone.glb';
 const FALLBACK_URL = '/media/drone-gimbal.webp';
 const ROTOR_NAMES = ['Rotor_FL', 'Rotor_FR', 'Rotor_RL', 'Rotor_RR'];
 
+export type DroneWaypoint = {
+  at: number;
+  x: number;
+  y: number;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+};
+
+export const DRONE_WAYPOINTS: DroneWaypoint[] = [
+  { at: 0, x: 0.48, y: 0.08, rotationX: 0.04, rotationY: -0.1, rotationZ: 0 },
+  { at: 0.28, x: 0.92, y: 0.56, rotationX: 0.12, rotationY: 0.34, rotationZ: -0.1 },
+  { at: 0.6, x: 0.84, y: -0.46, rotationX: -0.08, rotationY: -0.34, rotationZ: 0.12 },
+  { at: 1, x: 0.28, y: -0.72, rotationX: 0.04, rotationY: 0.16, rotationZ: -0.08 },
+];
+
+export function interpolateWaypoints(progress: number) {
+  const value = clamp(progress);
+  const nextIndex = DRONE_WAYPOINTS.findIndex((waypoint) => waypoint.at >= value);
+  if (nextIndex <= 0) return { ...DRONE_WAYPOINTS[0] };
+  const from = DRONE_WAYPOINTS[nextIndex - 1];
+  const to = DRONE_WAYPOINTS[nextIndex] ?? from;
+  const span = Math.max(0.0001, to.at - from.at);
+  const t = (value - from.at) / span;
+  return {
+    at: value,
+    x: from.x + (to.x - from.x) * t,
+    y: from.y + (to.y - from.y) * t,
+    rotationX: from.rotationX + (to.rotationX - from.rotationX) * t,
+    rotationY: from.rotationY + (to.rotationY - from.rotationY) * t,
+    rotationZ: from.rotationZ + (to.rotationZ - from.rotationZ) * t,
+  };
+}
+
 function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -41,6 +75,13 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
   }, [scene]);
 
   useEffect(() => {
+    if (typeof scene.traverse !== 'function') return;
+    scene.traverse((node) => {
+      if (/Obstacle sensor/i.test(node.name)) node.visible = false;
+    });
+  }, [scene]);
+
+  useEffect(() => {
     const updateScroll = () => {
       const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
       scrollProgress.current = clamp(window.scrollY / maxScroll);
@@ -52,16 +93,18 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
 
   useFrame((_, delta) => {
     const progress = scrollProgress.current;
+    const target = interpolateWaypoints(progress);
     const root = nodes.root;
     const yaw = nodes.yaw;
     const pitch = nodes.pitch;
     const targetYaw = pointer.current.x * 0.22;
     const targetPitch = -pointer.current.y * 0.14;
 
-    root.position.y = damp(root.position.y, -0.16 + progress * 0.52, 2.4, delta);
-    root.rotation.x = damp(root.rotation.x, 0.05 + progress * 0.08, 2.4, delta);
-    root.rotation.y = damp(root.rotation.y, -0.15 + progress * 0.48, 2.4, delta);
-    root.rotation.z = damp(root.rotation.z, progress * -0.12, 2.4, delta);
+    root.position.x = damp(root.position.x, target.x, 2.8, delta);
+    root.position.y = damp(root.position.y, target.y, 2.8, delta);
+    root.rotation.x = damp(root.rotation.x, target.rotationX, 2.8, delta);
+    root.rotation.y = damp(root.rotation.y, target.rotationY, 2.8, delta);
+    root.rotation.z = damp(root.rotation.z, target.rotationZ, 2.8, delta);
     if (yaw) yaw.rotation.y = damp(yaw.rotation.y, targetYaw, 5, delta);
     if (pitch) pitch.rotation.x = damp(pitch.rotation.x, targetPitch, 5, delta);
     for (const [index, rotor] of nodes.rotors.entries()) {
@@ -81,7 +124,7 @@ function SceneCanvas({ active, pointer }: { active: boolean; pointer: PointerRef
       frameloop={active ? 'always' : 'never'}
       dpr={[1, 1.5]}
       gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
-      camera={{ fov: 28, position: [0, 0.75, 4.8], near: 0.1, far: 100 }}
+      camera={{ fov: 30, position: [0, 0.75, 6.2], near: 0.1, far: 100 }}
     >
       <ambientLight intensity={1.6} />
       <directionalLight position={[3, 4, 5]} intensity={2.2} />
@@ -94,21 +137,13 @@ function SceneCanvas({ active, pointer }: { active: boolean; pointer: PointerRef
 }
 
 export function DroneScene() {
-  const { paused, reduced, desktop, saveData } = useMotion();
-  const eligible = desktop && !reduced && !saveData && !paused;
+  const { reduced, desktop, saveData } = useMotion();
+  const eligible = desktop && !reduced && !saveData;
   const [visible, setVisible] = useState(true);
   const [documentVisible, setDocumentVisible] = useState(true);
-  const [heroStage, setHeroStage] = useState(true);
   const sceneRef = useRef<HTMLDivElement>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const active = eligible && visible && documentVisible;
-
-  useEffect(() => {
-    const updateStage = () => setHeroStage(window.scrollY < window.innerHeight * 0.82);
-    updateStage();
-    window.addEventListener('scroll', updateStage, { passive: true });
-    return () => window.removeEventListener('scroll', updateStage);
-  }, []);
 
   useEffect(() => {
     const element = sceneRef.current;
@@ -142,7 +177,6 @@ export function DroneScene() {
       ref={sceneRef}
       className="drone-scene"
       data-active={active}
-      data-stage={heroStage ? 'hero' : 'away'}
       aria-label="Dron 3D interactivo"
     >
       {eligible ? (
