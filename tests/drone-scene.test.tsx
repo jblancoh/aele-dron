@@ -1183,3 +1183,50 @@ describe('heroBandPose — kept clear of the topline', () => {
     expect(pose.y).toBeGreaterThanOrEqual(band.top / heroHeight);
   });
 });
+
+// A shadow map nothing samples is a depth pass rendered every frame for no visible output. The
+// flight canvas turns `shadows` on and flags every mesh as a caster, so the meshes must also
+// receive: with no floor plane in the scene, self-shadowing is the only thing those shadows can
+// ever land on.
+describe('DroneScene — shadow flags', () => {
+  type ShadowMesh = { name: string; isMesh: true; castShadow: boolean; receiveShadow: boolean; visible: boolean };
+
+  const mesh = (name: string): ShadowMesh => ({ name, isMesh: true, castShadow: false, receiveShadow: false, visible: true });
+
+  function stubSceneWith(nodes: ShadowMesh[]) {
+    vi.mocked(useGLTF).mockReturnValue({
+      scene: {
+        getObjectByName: () => undefined,
+        traverse: (visit: (node: unknown) => void) => nodes.forEach(visit),
+      },
+    } as never);
+  }
+
+  afterEach(() => {
+    // Restore the file-level default: `vi.clearAllMocks()` resets recorded calls, not implementations.
+    vi.mocked(useGLTF).mockImplementation((() => ({ scene: { getObjectByName: () => undefined } })) as never);
+    delete (window as unknown as { requestIdleCallback?: unknown }).requestIdleCallback;
+  });
+
+  it('lets the drone receive the shadows it casts in flight mode', () => {
+    const body = mesh('Body');
+    stubSceneWith([body]);
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(body.castShadow).toBe(true);
+    expect(body.receiveShadow).toBe(true);
+  });
+
+  it('leaves both shadow flags off in bounded hover mode, where the canvas disables shadows', () => {
+    const body = mesh('Body');
+    stubSceneWith([body]);
+    (window as unknown as { requestIdleCallback: unknown }).requestIdleCallback = (callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 0 });
+      return 1;
+    };
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    expect(body.castShadow).toBe(false);
+    expect(body.receiveShadow).toBe(false);
+  });
+});

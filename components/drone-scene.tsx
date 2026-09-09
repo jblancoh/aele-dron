@@ -460,7 +460,11 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
       const mesh = node as Object3D & { isMesh?: boolean; castShadow?: boolean; receiveShadow?: boolean };
       if (mesh.isMesh) {
         mesh.castShadow = castsShadows;
-        mesh.receiveShadow = false;
+        // Casters must receive too. The drone floats alone — there is no floor plane for its
+        // shadow to land on — so self-shadowing (arms and rotors onto the body) is the only thing
+        // the shadow map can ever show. Leaving this `false` while `shadows` is on means the
+        // renderer fills a shadow map every frame that no material ever samples.
+        mesh.receiveShadow = castsShadows;
       }
     });
   }, [scene, mode]);
