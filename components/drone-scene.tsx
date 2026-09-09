@@ -140,6 +140,56 @@ export const FLIGHT_STOPS: FlightStop[] = [
   { selector: '#contacto', align: 0.28, clearBelow: '.contact-intro p:last-of-type', pose: LANDING_POSE },
 ];
 
+/**
+ * Parked stop for the mobile flight (see `MOBILE_FLIGHT_STOPS`): tucked into the ~100px strip
+ * between the end of `.contact-section` (`padding-bottom:80px`) and `.footer-top`
+ * (`padding-top:20px`) — the mobile analogue of `LANDING_POSE`, sized down for a narrower
+ * viewport. `y` here is only the pre-measurement fallback (see `flightPose`); the real vertical
+ * position is resolved live from `.contact-form-panel`'s bottom edge via `clearBelow`, same as
+ * desktop.
+ */
+export const MOBILE_LANDING_POSE: DronePose = {
+  x: 0.14,
+  y: 0.86,
+  width: 0.18,
+  rotationX: 0.06,
+  rotationY: 0.32,
+  rotationZ: 0.02,
+};
+
+/**
+ * Mobile's own flight stops. The compacted mobile layout leaves almost no open ground: the
+ * single-column catalogue and the stacked `#nosotros` have no gap beside their content at all, so
+ * the drone crosses those pinned small against a margin instead of resting in a gap that does not
+ * exist — see the per-stop comments below. Kept separate from `FLIGHT_STOPS` (desktop) because
+ * every pose here is sized and placed for a ~390px-wide viewport; mixing the two sets would either
+ * crush the desktop poses or blow the mobile ones off-screen.
+ */
+export const MOBILE_FLIGHT_STOPS: FlightStop[] = [
+  // Reducing the mobile h1 to clamp(40px,9vw,60px) opened a real band under the hero copy. The
+  // drone holds it left of centre so it never nears `.motion-control` (right:7%, bottom:82px —
+  // i.e. x>0.8 and y>0.84 at once).
+  { selector: null, pose: { x: 0.42, y: 0.72, width: 0.22, rotationX: 0.05, rotationY: -0.08, rotationZ: 0 } },
+  // The single-column catalogue leaves no gap beside the posters, so the drone crosses pinned to
+  // the right margin, small enough (width 0.14) to read as background depth instead of a cover.
+  { selector: '.film-0', pose: { x: 0.9, y: 0.45, width: 0.14, rotationX: 0.05, rotationY: -0.5, rotationZ: -0.05 } },
+  { selector: '.film-1', pose: { x: 0.9, y: 0.5, width: 0.14, rotationX: 0.04, rotationY: -0.46, rotationZ: 0.04 } },
+  { selector: '.film-2', pose: { x: 0.9, y: 0.45, width: 0.14, rotationX: 0.05, rotationY: -0.5, rotationZ: -0.05 } },
+  // The story is still full-bleed on mobile, but its own top band (above the centred copy) is
+  // clear — and, unlike the margins the drone hugs elsewhere, there is real room here, so it grows
+  // back out instead of staying pinned small.
+  { selector: '.scroll-story', pose: { x: 0.62, y: 0.22, width: 0.22, rotationX: 0.05, rotationY: -0.3, rotationZ: -0.03 } },
+  // `#nosotros` stacks its heading over its list with no side gap either, so the drone holds the
+  // left margin — crossing right-to-left gives the pass its own direction instead of repeating the
+  // catalogue's right-hand lane.
+  { selector: '#nosotros', pose: { x: 0.1, y: 0.55, width: 0.14, rotationX: 0.04, rotationY: 0.3, rotationZ: 0.03 } },
+  // Desktop clears `.contact-intro p:last-of-type`, but on the stacked mobile layout the form
+  // panel sits below that paragraph, not open air — clearing the panel itself is what actually
+  // lands the drone in the one open strip left in this section: between `.contact-form-panel` and
+  // `.footer-top`.
+  { selector: '#contacto', align: 0.3, clearBelow: '.contact-form-panel', pose: MOBILE_LANDING_POSE },
+];
+
 /** Gimbal aim held once parked, on top of the body rotation, so the camera stays on the form. */
 export const GIMBAL_LANDING_YAW = 0.28;
 export const GIMBAL_LANDING_PITCH = 0.05;
@@ -302,105 +352,18 @@ export function pointerLook(pointer: { x: number; y: number }, landing: number) 
   };
 }
 
-/** The two ways `DroneModel` can drive itself: scroll-linked flight (desktop) or a stationary
- * hover bounded to the hero (mobile/lite). Kept as a union rather than a boolean so a third mode
- * is not a breaking change later. */
-export type DroneMode = 'flight' | 'hover';
-
 /**
- * Hover mode has no scroll position to derive motion from, so every term below is a pure
- * function of wall-clock time instead. All three offsets are plain sines of the same angular
- * frequency (at 1x, 2x and 3x, so the composite still repeats every `HOVER_PERIOD`), which makes
- * `hoverPose` bounded (a sine is never further than its amplitude from 0), continuous (sines have
- * no jumps), periodic (by construction), and exactly `base` at `time = 0` (every sine of 0 is 0).
+ * `DroneModel` used to have two different ways to drive itself: scroll-linked flight (desktop) or
+ * a stationary, wall-clock-driven hover bounded to the hero (mobile/lite). That hover mode is gone
+ * — mobile now flies the scroll too, over `MOBILE_FLIGHT_STOPS` instead of `FLIGHT_STOPS`. The
+ * only things this value still selects are which stop list to fly and the cheap-vs-full WebGL
+ * quality profile in `SceneCanvas` (dpr ceiling, shadows, antialiasing, light count) — a render
+ * profile, not a locomotion mode, hence the rename from `DroneMode` to `DroneProfile`. It mirrors
+ * `capabilityTier`'s non-`'none'` states 1:1 (see `DroneScene`, which only ever computes this once
+ * eligibility has already filtered `'none'` out) but is kept as its own type so `DroneModel` and
+ * `SceneCanvas` never have to account for the `'none'` case at all.
  */
-const HOVER_PERIOD = 6;
-const HOVER_ANGULAR = (2 * Math.PI) / HOVER_PERIOD;
-const HOVER_DRIFT_AMPLITUDE = 0.012;
-const HOVER_BOB_AMPLITUDE = 0.02;
-const HOVER_TILT_AMPLITUDE = 0.03;
-
-export function hoverPose(base: DronePose, time: number): DronePose {
-  const angle = time * HOVER_ANGULAR;
-  return {
-    ...base,
-    x: base.x + Math.sin(angle) * HOVER_DRIFT_AMPLITUDE,
-    y: base.y + Math.sin(angle * 2) * HOVER_BOB_AMPLITUDE,
-    rotationZ: base.rotationZ + Math.sin(angle * 3) * HOVER_TILT_AMPLITUDE,
-  };
-}
-
-/**
- * Stands in for `pointerLook` while hovering: there is no pointer worth reacting to on the touch
- * devices this mode targets, so the gimbal runs a slow, bounded, time-driven scan instead.
- */
-const HOVER_LOOK_PERIOD = 9;
-const HOVER_LOOK_ANGULAR = (2 * Math.PI) / HOVER_LOOK_PERIOD;
-const HOVER_LOOK_YAW_AMPLITUDE = 0.16;
-const HOVER_LOOK_PITCH_AMPLITUDE = 0.08;
-
-export function hoverLook(time: number): { yaw: number; pitch: number } {
-  const angle = time * HOVER_LOOK_ANGULAR;
-  return {
-    yaw: Math.sin(angle) * HOVER_LOOK_YAW_AMPLITUDE,
-    pitch: Math.sin(angle * 2) * HOVER_LOOK_PITCH_AMPLITUDE,
-  };
-}
-
-/**
- * Rotors idle at this speed while hovering. `rotorTargetSpeed(progress, landing)` is a function
- * of scroll and returns 0 at `progress === 0` by design — flight rotors only spin up once the
- * page starts moving. Hover has no scroll at all, so reusing that function would freeze the
- * rotors on a drone that is otherwise visibly bobbing and drifting, which reads as broken rather
- * than parked.
- */
-export const HOVER_ROTOR_SPEED = 9;
-
-/** Small, centred, near the top of the hero — a safe place to sit if the band cannot be measured
- * or is too thin to be worth flying in. */
-const HOVER_DEFAULT_POSE: DronePose = {
-  x: 0.5,
-  y: 0.2,
-  width: 0.22,
-  rotationX: 0.05,
-  rotationY: 0,
-  rotationZ: 0,
-};
-/** Below this many pixels a band is not worth flying in — a sliver like that would force the
- * drone's width down so far it stops reading as a drone at all. */
-const MIN_HOVER_BAND = 60;
-
-/**
- * Keeps the hovering drone inside the empty band the compacted mobile hero opens up around its
- * copy, expressed the same way as every other pose so it can feed straight into `poseToWorld`.
- * `band` is measured in the hero's own pixels (the open strip's top/bottom edges); `heroHeight`
- * converts that into the viewport-fraction `y` the bounded canvas actually renders in — the
- * bounded canvas fills the hero, not the window, so "viewport" here means the hero's box. A band
- * too small to be worth flying in, or a hero that could not be measured, degrades to a small
- * default pose instead of a NaN or an off-screen one.
- */
-/**
- * Top edge of the open band the hovering drone may occupy, in the hero's own pixels. `.hero-topline`
- * paints with no `z-index` of its own (see the CSS comment on `.drone-scene`), which puts it below
- * the drone's `z-index:2` — so the band must start below the topline's bottom edge, not the hero's
- * own top edge (`0`), or a band measured from `0` lets the drone fly directly over that text. Both
- * arguments are viewport-relative (`getBoundingClientRect()` values), so the topline's own position
- * inside `.hero` — and any header height above the hero — are already baked in by the caller having
- * measured them live, rather than hard-coded here. Degrades to the hero's own top edge if the
- * topline could not be measured, and never returns a negative offset.
- */
-export function heroBandTop(toplineBottom: number | null, heroTop: number): number {
-  if (toplineBottom === null) return 0;
-  return Math.max(0, toplineBottom - heroTop);
-}
-
-export function heroBandPose(band: { top: number; bottom: number }, heroHeight: number): DronePose {
-  const bandHeight = band.bottom - band.top;
-  if (heroHeight <= 0 || bandHeight < MIN_HOVER_BAND) return HOVER_DEFAULT_POSE;
-  const y = clamp((band.top + band.bottom) / 2 / heroHeight);
-  const width = clamp((bandHeight / heroHeight) * 0.8, 0.12, HOVER_DEFAULT_POSE.width);
-  return { ...HOVER_DEFAULT_POSE, y, width };
-}
+export type DroneProfile = 'full' | 'lite';
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
@@ -426,7 +389,7 @@ function findNode(scene: Object3D, name: string) {
 
 type PointerRef = { current: { x: number; y: number } };
 
-function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode }) {
+function DroneModel({ pointer, profile }: { pointer: PointerRef; profile: DroneProfile }) {
   const { scene } = useGLTF(MODEL_URL);
   const { viewport, size } = useThree();
   const maxScroll = useRef(1);
@@ -434,10 +397,6 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
   const stops = useRef<ResolvedStop[]>([]);
   const clearBelow = useRef(0);
   const rotorSpeed = useRef(0);
-  // Hover has no scroll-anchored stops — just the open band the compacted mobile hero leaves
-  // around its copy, measured in the hero's own pixels (see `heroBandPose`).
-  const heroHeight = useRef(0);
-  const heroBand = useRef({ top: 0, bottom: 0 });
   const nodes = useMemo(() => {
     const droneRoot = findNode(scene, 'DroneRoot') ?? scene;
     return {
@@ -452,9 +411,9 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
 
   useEffect(() => {
     if (typeof scene.traverse !== 'function') return;
-    // The bounded hover canvas never enables shadows (see `SceneCanvas`), so flagging meshes as
-    // shadow casters there would just be wasted per-mesh state with nothing to show for it.
-    const castsShadows = mode === 'flight';
+    // The lite canvas never enables shadows (see `SceneCanvas`), so flagging meshes as shadow
+    // casters there would just be wasted per-mesh state with nothing to show for it.
+    const castsShadows = profile === 'full';
     scene.traverse((node) => {
       if (/Obstacle sensor/i.test(node.name)) node.visible = false;
       const mesh = node as Object3D & { isMesh?: boolean; castShadow?: boolean; receiveShadow?: boolean };
@@ -467,26 +426,24 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
         mesh.receiveShadow = castsShadows;
       }
     });
-  }, [scene, mode]);
+  }, [scene, profile]);
 
   useEffect(() => {
-    // Flight is scroll-linked and needs the full page layout — 8 selectors, a scroll listener,
-    // and a `ResizeObserver` on the whole document body — which is exactly the cost hover mode
-    // exists to avoid paying on mobile. Skipping this effect entirely (rather than just not using
-    // its result) is the saving: it never touches `document.querySelector('.film-0')` and friends.
-    if (mode !== 'flight') return;
+    // Both profiles fly the scroll now, just over different stop lists — see `MOBILE_FLIGHT_STOPS`
+    // for why mobile needs its own set rather than reusing `FLIGHT_STOPS`.
+    const activeStops = profile === 'lite' ? MOBILE_FLIGHT_STOPS : FLIGHT_STOPS;
     const measure = (selector: string) => {
       const element = document.querySelector(selector);
       if (!element) return null;
       const rect = element.getBoundingClientRect();
       return { top: rect.top + window.scrollY, height: rect.height };
     };
-    const parked = FLIGHT_STOPS[FLIGHT_STOPS.length - 1];
+    const parked = activeStops[activeStops.length - 1];
     let measuredHeight = 0;
     const remeasure = () => {
       measuredHeight = document.documentElement.scrollHeight;
       maxScroll.current = Math.max(1, measuredHeight - window.innerHeight);
-      stops.current = resolveStopOffsets(FLIGHT_STOPS, measure, window.innerHeight, maxScroll.current);
+      stops.current = resolveStopOffsets(activeStops, measure, window.innerHeight, maxScroll.current);
       const element = parked.selector ? document.querySelector(parked.selector) : null;
       if (!element) return;
       const rect = element.getBoundingClientRect();
@@ -509,69 +466,12 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', remeasure);
     };
-  }, [mode]);
+  }, [profile]);
 
-  useEffect(() => {
-    // Hover still needs to know where the hero's copy leaves it room, but that is one element and
-    // its own container — nothing like the page-wide measurement flight mode needs, and no reason
-    // to re-measure on scroll since the bounded canvas does not move with the page.
-    if (mode !== 'hover') return;
-    const measureBand = () => {
-      const hero = document.querySelector('.hero');
-      if (!hero) {
-        heroHeight.current = 0;
-        heroBand.current = { top: 0, bottom: 0 };
-        return;
-      }
-      const heroRect = hero.getBoundingClientRect();
-      heroHeight.current = heroRect.height;
-      // The band must start below the topline, not the hero's own top edge — see `heroBandTop`.
-      const topline = document.querySelector('.hero-topline');
-      const bandTop = heroBandTop(topline ? topline.getBoundingClientRect().bottom : null, heroRect.top);
-      const copy = document.querySelector('.hero-copy');
-      if (!copy) {
-        heroBand.current = { top: bandTop, bottom: heroRect.height };
-        return;
-      }
-      const copyRect = copy.getBoundingClientRect();
-      heroBand.current = { top: bandTop, bottom: Math.max(bandTop, copyRect.top - heroRect.top) };
-    };
-    measureBand();
-    window.addEventListener('resize', measureBand, { passive: true });
-    return () => window.removeEventListener('resize', measureBand);
-  }, [mode]);
-
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
     const root = nodes.root;
     const yaw = nodes.yaw;
     const pitch = nodes.pitch;
-
-    if (mode === 'hover') {
-      const elapsed = state.clock.elapsedTime;
-      const base = heroBandPose(heroBand.current, heroHeight.current);
-      const pose = hoverPose(base, elapsed);
-      const target = poseToWorld(pose, viewport.width, viewport.height);
-      const look = hoverLook(elapsed);
-
-      root.position.x = follow(root.position.x, target.x, 2.8, delta, 0);
-      root.position.y = follow(root.position.y, target.y, 2.8, delta, 0);
-      root.rotation.x = damp(root.rotation.x, pose.rotationX, 2.8, delta);
-      root.rotation.y = damp(root.rotation.y, pose.rotationY, 2.8, delta);
-      root.rotation.z = damp(root.rotation.z, pose.rotationZ, 2.8, delta);
-      root.scale.setScalar(follow(root.scale.x, target.scale, 2.8, delta, 0));
-      if (yaw) yaw.rotation.y = damp(yaw.rotation.y, look.yaw, 5, delta);
-      if (pitch) pitch.rotation.x = damp(pitch.rotation.x, look.pitch, 5, delta);
-
-      // Hover has no scroll to spin the rotors up with, so they idle at a fixed speed instead of
-      // `rotorTargetSpeed`, which is 0 at rest — see `HOVER_ROTOR_SPEED`.
-      rotorSpeed.current = stepRotorSpeed(rotorSpeed.current, HOVER_ROTOR_SPEED, delta);
-      if (rotorSpeed.current !== 0) {
-        for (const [index, rotor] of nodes.rotors.entries()) {
-          rotor.rotation.y += delta * (index % 2 === 0 ? rotorSpeed.current : -rotorSpeed.current);
-        }
-      }
-      return;
-    }
 
     // Read the scroll here rather than in a listener: a parked drone that is one frame behind
     // the page is a drone that visibly slides.
@@ -609,21 +509,21 @@ function DroneModel({ pointer, mode }: { pointer: PointerRef; mode: DroneMode })
 function SceneCanvas({
   active,
   pointer,
-  mode,
+  profile,
   onDegrade,
   onContextLost,
 }: {
   active: boolean;
   pointer: PointerRef;
-  mode: DroneMode;
+  profile: DroneProfile;
   onDegrade: () => void;
   onContextLost: () => void;
 }) {
-  // The bounded (mobile/lite) canvas is a fraction of the screen and runs on the phones the
-  // desktop rig was never tuned for, so it gets the cheap side of every WebGL knob: a lower
-  // device-pixel-ratio ceiling, no antialiasing, no stencil buffer, the default (not
-  // high-performance) GPU preference, no shadow map, and two lights instead of five.
-  const bounded = mode === 'hover';
+  // The lite canvas runs on the phones the desktop rig was never tuned for, so it gets the cheap
+  // side of every WebGL knob: a lower device-pixel-ratio ceiling, no antialiasing, no stencil
+  // buffer, the default (not high-performance) GPU preference, no shadow map, and two lights
+  // instead of five.
+  const lite = profile === 'lite';
   const warmedUp = useRef(false);
 
   useEffect(() => {
@@ -656,10 +556,10 @@ function SceneCanvas({
       className="drone-canvas"
       aria-hidden="true"
       frameloop={active ? 'always' : 'never'}
-      dpr={bounded ? [0.75, 1] : [1, 1.25]}
-      shadows={!bounded}
+      dpr={lite ? [0.75, 1] : [1, 1.25]}
+      shadows={!lite}
       gl={
-        bounded
+        lite
           ? { alpha: true, antialias: false, powerPreference: 'default', stencil: false }
           : { alpha: true, antialias: true, powerPreference: 'high-performance' }
       }
@@ -672,7 +572,7 @@ function SceneCanvas({
         gl.outputColorSpace = SRGBColorSpace;
         gl.toneMapping = ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.08;
-        if (!bounded) {
+        if (!lite) {
           gl.shadowMap.enabled = true;
           gl.shadowMap.type = PCFSoftShadowMap;
         }
@@ -685,7 +585,7 @@ function SceneCanvas({
       }}
       camera={{ fov: 30, position: [0, CAMERA_Y, 6.2], near: 0.1, far: 100 }}
     >
-      {bounded ? (
+      {lite ? (
         <>
           <ambientLight intensity={1.1} />
           <directionalLight position={[3, 4, 5]} intensity={1.6} color="#fff5ec" />
@@ -703,7 +603,7 @@ function SceneCanvas({
         <AdaptiveDpr />
         <AdaptiveEvents />
         <Suspense fallback={null}>
-          <DroneModel pointer={pointer} mode={mode} />
+          <DroneModel pointer={pointer} profile={profile} />
         </Suspense>
       </PerformanceMonitor>
     </Canvas>
@@ -711,26 +611,26 @@ function SceneCanvas({
 }
 
 /**
- * Idle deferral for the bounded (lite/hover) canvas: even at ~220 KB gzip (225,635 bytes),
- * fetching the GLB and spinning up a WebGL context competes with the hero poster for the same
- * first seconds that decide LCP. Desktop's `full` tier has no such deferral — it already gated
- * behind the desktop breakpoint, a much larger and less battery-constrained device budget. Waiting for
+ * Idle deferral for the lite canvas: even at ~220 KB gzip (225,635 bytes), fetching the GLB and
+ * spinning up a WebGL context competes with the hero poster for the same first seconds that decide
+ * LCP. Desktop's `full` profile has no such deferral — it already gated behind the desktop
+ * breakpoint, a much larger and less battery-constrained device budget. Waiting for
  * `readyState === 'complete'` means the rest of the page's critical work is done; waiting for an
  * idle callback on top of that (falling back to a flat 200ms if the browser has none) means the
  * mount does not compete with whatever that "complete" event itself triggers.
  */
-function useDeferredCanvasMount(mode: DroneMode) {
+function useDeferredCanvasMount(profile: DroneProfile) {
   // Never seeded from the first render: `getServerSnapshot()` in motion-context.tsx always reports
   // the "no motion" policy on both the server render and the client's hydration render, which
-  // resolves to `mode === 'flight'` regardless of the real device. A lazy `useState` initialiser
-  // keyed off `mode` would read that always-flight snapshot once and freeze — on a real hover
-  // (mobile/lite) device `ready` would start `true` and never revisit itself once `mode` settles to
-  // 'hover', permanently skipping the readyState/idle deferral this hook exists to provide. Instead
-  // `ready` starts `false` and an effect derives the real value once `mode` is trustworthy.
+  // resolves to `profile === 'full'` regardless of the real device. A lazy `useState` initialiser
+  // keyed off `profile` would read that always-full snapshot once and freeze — on a real lite
+  // (mobile) device `ready` would start `true` and never revisit itself once `profile` settles to
+  // 'lite', permanently skipping the readyState/idle deferral this hook exists to provide. Instead
+  // `ready` starts `false` and an effect derives the real value once `profile` is trustworthy.
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (mode !== 'hover') {
+    if (profile !== 'lite') {
       setReady(true);
       return;
     }
@@ -760,16 +660,15 @@ function useDeferredCanvasMount(mode: DroneMode) {
       if (idleId !== undefined) cancelIdle?.(idleId);
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [mode]);
+  }, [profile]);
 
   return ready;
 }
 
 export function DroneScene() {
   const { paused, capabilityTier } = useMotion();
-  // Both the full (desktop, scroll-linked flight) and lite (mobile, bounded hover) tiers mount
-  // the drone now — only `none` (reduced motion, Save-Data, or a failed performance verdict)
-  // renders nothing.
+  // Both the full (desktop) and lite (mobile) profiles fly the scroll now — only `none` (reduced
+  // motion, Save-Data, or a failed performance verdict) renders nothing.
   //
   // WCAG 2.2.2 (Level A): the hero's pause control must be able to stop this animation, and
   // README.md's "Media behavior" section documents that it does. "Stopping" the drone means
@@ -779,7 +678,7 @@ export function DroneScene() {
   // performance verdict changing mid-session must, because those say the session can no longer
   // run the drone at all.
   const eligible = capabilityTier !== 'none';
-  const mode: DroneMode = capabilityTier === 'lite' ? 'hover' : 'flight';
+  const profile: DroneProfile = capabilityTier === 'lite' ? 'lite' : 'full';
 
   // If motion was already turned off before this component ever mounted, there is no running
   // drone to preserve by freezing — mounting one anyway would just pay for the GLB fetch and a
@@ -823,7 +722,7 @@ export function DroneScene() {
   // on screen, just motionless.
   const visuallyActive = mountable && visible && documentVisible;
   const running = visuallyActive && !paused;
-  const canvasReady = useDeferredCanvasMount(mode);
+  const canvasReady = useDeferredCanvasMount(profile);
 
   // A callback ref rather than `useRef` + a `useEffect` with `deps: []`: the lying first (SSR
   // hydration) render always has `mountable === false` (see the shared root cause), so the
@@ -852,16 +751,18 @@ export function DroneScene() {
   }, []);
 
   useEffect(() => {
-    // Hover has no pointer-reactive look (see `hoverLook`), so the bounded tier never pays for a
-    // global pointermove listener at all — one more thing mobile does not need to track.
-    if (!running || mode !== 'flight') return;
+    // Touch devices have no pointer worth reacting to, so the lite profile never pays for a
+    // global pointermove listener at all — one more thing mobile does not need to track. The
+    // gimbal on lite just holds `pointerLook`'s rest position ({ x: 0, y: 0 } — see `pointer`'s
+    // initial value above), same as flight before the first pointer event ever arrives on desktop.
+    if (!running || profile !== 'full') return;
     const onPointerMove = (event: PointerEvent) => {
       pointer.current.x = clamp((event.clientX / window.innerWidth) * 2 - 1, -1, 1);
       pointer.current.y = clamp((event.clientY / window.innerHeight) * 2 - 1, -1, 1);
     };
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => window.removeEventListener('pointermove', onPointerMove);
-  }, [running, mode]);
+  }, [running, profile]);
 
   // No still stands in for the drone: under reduced motion, save-data, a failed performance
   // verdict, or motion already paused before mount, the page simply renders without it rather
@@ -873,17 +774,13 @@ export function DroneScene() {
       ref={sceneRefCallback}
       className="drone-scene"
       data-active={visuallyActive}
-      // React only renders `data-*` attributes it is given a defined value for, so the full tier
-      // (mode === 'flight') never gets a `data-bounded` attribute at all — see the CSS comment on
-      // `.drone-scene[data-bounded="true"]` for why that, not a class, is what switches position.
-      data-bounded={mode === 'hover' ? true : undefined}
       aria-label="Dron 3D interactivo"
     >
       {canvasReady && (
         <SceneCanvas
           active={running}
           pointer={pointer}
-          mode={mode}
+          profile={profile}
           onDegrade={handleDegrade}
           onContextLost={handleContextLost}
         />

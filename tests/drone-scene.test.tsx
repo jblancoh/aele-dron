@@ -8,12 +8,9 @@ import {
   FLIGHT_STOPS,
   GIMBAL_LANDING_PITCH,
   GIMBAL_LANDING_YAW,
-  HOVER_ROTOR_SPEED,
   LANDING_POSE,
-  heroBandPose,
-  heroBandTop,
-  hoverLook,
-  hoverPose,
+  MOBILE_FLIGHT_STOPS,
+  MOBILE_LANDING_POSE,
   interpolatePose,
   flightPose,
   follow,
@@ -124,15 +121,28 @@ describe('DroneScene', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
-  // Superseded by Phase 4 ("DroneScene — bounded (lite/hover) mode" below): lite is now a
-  // first-class bounded hover mode, not a placeholder that renders nothing. Inverted here, like
-  // the pause test above, so a future regression back to "lite renders nothing" fails a test
-  // instead of shipping silently.
-  it('mounts a bounded scene — not nothing — when tier is lite', () => {
+  // Superseded by Phase 4 ("DroneScene — lite (mobile) tier" below): lite is a first-class flying
+  // tier, not a placeholder that renders nothing. Inverted here, like the pause test above, so a
+  // future regression back to "lite renders nothing" fails a test instead of shipping silently.
+  it('mounts a scene — not nothing — when tier is lite', () => {
     motion.tier = 'lite';
     const { container } = render(<DroneScene />);
     expect(container).not.toBeEmptyDOMElement();
-    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
+    expect(container.querySelector('.drone-scene')).toBeInTheDocument();
+  });
+
+  // The lite canvas used to be `position:absolute`, clipped to `.hero` via a `data-bounded`
+  // attribute (bounded hover mode). That mode is gone — mobile flies the full-page scroll now, so
+  // the mount point stays `position:fixed` (see `.drone-scene` in globals.css) on every tier and
+  // never carries `data-bounded` at all.
+  it('never marks the mount point as data-bounded, on any tier', () => {
+    motion.tier = 'full';
+    const { container: fullContainer } = render(<DroneScene />);
+    expect(fullContainer.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
+
+    motion.tier = 'lite';
+    const { container: liteContainer } = render(<DroneScene />);
+    expect(liteContainer.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
   });
 
   // WCAG 2.2.2 (Level A) requires that any moving, blinking or scrolling content the page starts
@@ -229,7 +239,7 @@ describe('DroneScene', () => {
   });
 
   // Superseded by Phase 4: the viewport shrinking below the desktop breakpoint now switches the
-  // drone to bounded hover mode instead of unmounting it — lite stopped being a no-op tier.
+  // drone to the lite flying tier instead of unmounting it — lite stopped being a no-op tier.
   // Regression guard: the `IntersectionObserver` effect used to run once with `deps: []`, on the
   // render React uses for hydration — where `mountable` is always false (see the shared root
   // cause) and the component returns `null`. `sceneRef.current` was therefore `null` the one and
@@ -275,9 +285,9 @@ describe('DroneScene', () => {
     vi.stubGlobal('IntersectionObserver', originalIntersectionObserver);
   });
 
-  it('switches to bounded hover mode instead of unmounting when the viewport shrinks below the desktop breakpoint', () => {
-    // Entering hover mode (re-)triggers the idle deferral (see `useDeferredCanvasMount`), so this
-    // transition needs the same synchronous-idle-callback stub the bounded-mode tests use.
+  it('switches to the lite quality profile instead of unmounting when the viewport shrinks below the desktop breakpoint', () => {
+    // Entering the lite profile (re-)triggers the idle deferral (see `useDeferredCanvasMount`), so
+    // this transition needs the same synchronous-idle-callback stub the lite-tier tests use.
     const idleCallback = vi.fn((callback: IdleRequestCallback) => {
       callback({ didTimeout: false, timeRemaining: () => 0 });
       return 1;
@@ -285,27 +295,26 @@ describe('DroneScene', () => {
     (window as unknown as { requestIdleCallback: typeof idleCallback }).requestIdleCallback = idleCallback;
 
     motion.tier = 'full';
-    const { container, rerender } = render(<DroneScene />);
-    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
-    expect(container.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
+    const { rerender } = render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'true');
 
     motion.tier = 'lite';
     motion.capabilityTier = 'lite';
     rerender(<DroneScene />);
-    // The mount point picks up `data-bounded` immediately, and the canvas re-mounts once the
-    // (stubbed, synchronous) idle deferral for the newly-entered hover mode resolves.
+    // The canvas re-mounts once the (stubbed, synchronous) idle deferral for the newly-entered
+    // lite profile resolves, carrying the cheap quality profile instead of unmounting.
     expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
-    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'false');
 
     delete (window as unknown as { requestIdleCallback?: unknown }).requestIdleCallback;
   });
 });
 
-// Phase 4: the lite tier now mounts a bounded, hover-mode drone instead of rendering nothing.
-// Mounting the canvas is deferred to idle so the hero poster's LCP is never blocked by the GLB
-// fetch, so every test that needs the canvas present makes `requestIdleCallback` run its callback
-// synchronously — the deferral itself is exercised by its own dedicated tests below.
-describe('DroneScene — bounded (lite/hover) mode', () => {
+// Phase 4: the lite tier now mounts a flying drone instead of rendering nothing. Mounting the
+// canvas is deferred to idle so the hero poster's LCP is never blocked by the GLB fetch, so every
+// test that needs the canvas present makes `requestIdleCallback` run its callback synchronously —
+// the deferral itself is exercised by its own dedicated tests below.
+describe('DroneScene — lite (mobile) tier', () => {
   // `vi.stubGlobal`/`vi.unstubAllGlobals` would also revert the one-time `IntersectionObserver`/
   // `ResizeObserver` stubs installed by tests/setup.ts at module load, breaking every later test
   // in the file — so `requestIdleCallback` is patched onto `window` directly and removed by hand.
@@ -322,19 +331,6 @@ describe('DroneScene — bounded (lite/hover) mode', () => {
     return idleCallback;
   }
 
-  it('marks the mount point as bounded to the hero in the lite tier', () => {
-    stubSynchronousIdleCallback();
-    motion.tier = 'lite';
-    const { container } = render(<DroneScene />);
-    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
-  });
-
-  it('does not bound the mount point in the full/flight tier', () => {
-    motion.tier = 'full';
-    const { container } = render(<DroneScene />);
-    expect(container.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
-  });
-
   it('never registers a pointermove listener in the lite tier', () => {
     stubSynchronousIdleCallback();
     const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
@@ -343,18 +339,20 @@ describe('DroneScene — bounded (lite/hover) mode', () => {
     expect(addEventListenerSpy.mock.calls.some(([type]) => (type as string) === 'pointermove')).toBe(false);
   });
 
-  it('never queries the flight-stop selectors, the scroll listener, or a body ResizeObserver in the lite tier', () => {
+  // Inverted from the pre-mobile-flight version of this test (which asserted the lite tier never
+  // queried these at all, back when lite was a hero-bound hover with no scroll anchoring). Mobile
+  // now flies its own scroll-anchored stops (`MOBILE_FLIGHT_STOPS`) over the same page selectors
+  // as desktop, so a regression back to "lite never measures the page" should fail this test.
+  it('now registers the flight-stop selectors, the scroll listener, and a body ResizeObserver in the lite tier', () => {
     stubSynchronousIdleCallback();
     const querySelectorSpy = vi.spyOn(document, 'querySelector');
     const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
     const observeSpy = vi.spyOn(window.ResizeObserver.prototype, 'observe');
     motion.tier = 'lite';
     render(<DroneScene />);
-    // The big saving this phase exists for: none of the 8 flight-stop selectors are ever asked
-    // for, so the 3 catalogue films (and the rest of the page) never get measured on mobile.
-    expect(querySelectorSpy).not.toHaveBeenCalledWith('.film-0');
-    expect(addEventListenerSpy.mock.calls.some(([type]) => (type as string) === 'scroll')).toBe(false);
-    expect(observeSpy.mock.calls.some(([target]) => target === document.body)).toBe(false);
+    expect(querySelectorSpy).toHaveBeenCalledWith('.film-0');
+    expect(addEventListenerSpy.mock.calls.some(([type]) => (type as string) === 'scroll')).toBe(true);
+    expect(observeSpy.mock.calls.some(([target]) => target === document.body)).toBe(true);
   });
 
   it('configures a cheaper WebGL context in the lite tier', () => {
@@ -384,12 +382,12 @@ describe('DroneScene — bounded (lite/hover) mode', () => {
     expect(liteLights).toBeLessThan(fullLights);
   });
 
-  // `getServerSnapshot()` in motion-context.tsx always reports 'flight' on the hydration render
-  // (see the comment there), so `useDeferredCanvasMount`'s state can never be seeded from that
-  // first render's `mode` — it has to be derived in an effect once `mode` actually settles to
-  // 'hover'. A `useState(mode !== 'hover')` initialiser reads that lying first render and never
+  // `getServerSnapshot()` in motion-context.tsx always reports 'full' on the hydration render (see
+  // the comment there), so `useDeferredCanvasMount`'s state can never be seeded from that first
+  // render's `profile` — it has to be derived in an effect once `profile` actually settles to
+  // 'lite'. A `useState(profile !== 'lite')` initialiser reads that lying first render and never
   // reruns, permanently skipping the whole readyState/idle deferral in production.
-  it('still defers the idle path when hover mode only settles after the first render (regression: lazy useState initializer reads the always-flight hydration snapshot)', () => {
+  it('still defers the idle path when the lite profile only settles after the first render (regression: lazy useState initializer reads the always-full hydration snapshot)', () => {
     const idleCallback = stubSynchronousIdleCallback();
     Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
 
@@ -417,14 +415,14 @@ describe('DroneScene — bounded (lite/hover) mode', () => {
     motion.tier = 'full';
     motion.capabilityTier = 'full';
     render(<Wrapper />);
-    // Starts in 'full'/flight — no deferral, mounts immediately.
+    // Starts in the full profile — no deferral, mounts immediately.
     expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
 
     act(() => {
       screen.getByRole('button', { name: 'go lite' }).click();
     });
 
-    // Switching to hover mid-session must still defer via requestIdleCallback — it must not have
+    // Switching to lite mid-session must still defer via requestIdleCallback — it must not have
     // been permanently skipped by a stale `ready === true` from the first render.
     expect(idleCallback).toHaveBeenCalled();
   });
@@ -1038,149 +1036,96 @@ describe('pointerLook', () => {
   });
 });
 
-// Phase 3: hover mode has no scroll to derive motion from, so `hoverPose`/`hoverLook` are driven
-// purely by wall-clock time instead of `progress`/`landing`.
-describe('hoverPose', () => {
-  const base = { x: 0.5, y: 0.2, width: 0.22, rotationX: 0.05, rotationY: 0, rotationZ: 0 };
+// The mobile hover mode this file used to test here (`hoverPose`, `hoverLook`,
+// `HOVER_ROTOR_SPEED`, `heroBandPose`, `heroBandTop`) is gone — mobile flies its own scroll-
+// anchored stops now (`MOBILE_FLIGHT_STOPS`, tested below) instead of a wall-clock-driven hover
+// bounded to the hero. See git history (`f203a51`, `cc07db8`) to recover the old implementation
+// and tests if that mode is ever needed again.
+describe('MOBILE_FLIGHT_STOPS', () => {
+  const catalogueAndServices = MOBILE_FLIGHT_STOPS.filter(
+    (stop) => stop.selector?.startsWith('.film-') || stop.selector === '#nosotros',
+  );
+  const story = MOBILE_FLIGHT_STOPS.find((stop) => stop.selector === '.scroll-story');
+  const hero = MOBILE_FLIGHT_STOPS[0];
 
-  it('sits exactly on the base pose at time zero', () => {
-    expect(hoverPose(base, 0)).toEqual(base);
-  });
-
-  it('stays bounded around the base pose forever', () => {
-    for (let time = 0; time < 200; time += 1.7) {
-      const pose = hoverPose(base, time);
-      expect(Math.abs(pose.x - base.x)).toBeLessThan(0.05);
-      expect(Math.abs(pose.y - base.y)).toBeLessThan(0.05);
-      expect(Math.abs(pose.rotationZ - base.rotationZ)).toBeLessThan(0.05);
+  it('keeps every stop inside the viewport', () => {
+    for (const { pose } of MOBILE_FLIGHT_STOPS) {
+      expect(pose.x - pose.width / 2).toBeGreaterThan(-0.02);
+      expect(pose.x + pose.width / 2).toBeLessThan(1.02);
+      expect(pose.y).toBeGreaterThan(0);
+      expect(pose.y).toBeLessThan(1);
     }
   });
 
-  it('changes continuously — a small step in time is a small step in pose', () => {
-    let previous = hoverPose(base, 0);
-    for (let time = 0.016; time < 20; time += 0.016) {
-      const next = hoverPose(base, time);
-      expect(Math.abs(next.x - previous.x)).toBeLessThan(0.01);
-      expect(Math.abs(next.y - previous.y)).toBeLessThan(0.01);
-      previous = next;
+  // The single-column catalogue and the stacked `#nosotros` leave no real gap beside their
+  // content, so the drone has to hug a screen edge, small enough to read as depth rather than a
+  // cover — see the per-stop comments in `MOBILE_FLIGHT_STOPS`.
+  it('pins the catalogue and services stops to a screen edge', () => {
+    expect(catalogueAndServices.length).toBeGreaterThan(0);
+    for (const { pose } of catalogueAndServices) {
+      expect(pose.width).toBeLessThanOrEqual(0.15);
+      const distanceToNearestEdge = Math.min(pose.x, 1 - pose.x);
+      expect(distanceToNearestEdge).toBeLessThan(0.12);
     }
   });
 
-  it('repeats on a fixed period', () => {
-    const period = 6; // seconds — must match the internal HOVER_PERIOD.
-    for (const time of [0, 0.4, 1.9, 3.3, 5.1]) {
-      const a = hoverPose(base, time);
-      const b = hoverPose(base, time + period);
-      expect(a.x).toBeCloseTo(b.x);
-      expect(a.y).toBeCloseTo(b.y);
-      expect(a.rotationZ).toBeCloseTo(b.rotationZ);
+  it('makes the story stop bigger than the catalogue/services stops, since there is real room there', () => {
+    expect(story).toBeDefined();
+    for (const { pose } of catalogueAndServices) expect(story!.pose.width).toBeGreaterThan(pose.width);
+  });
+
+  // `.motion-control` sits at right:7%, bottom:82px on mobile — roughly x>0.8 and y>0.84 at once —
+  // and it is interactive, so the hero stop must never combine both.
+  it('keeps the hero stop clear of the motion-control zone', () => {
+    expect(hero.selector).toBeNull();
+    expect(hero.pose.x > 0.8 && hero.pose.y > 0.84).toBe(false);
+  });
+
+  it('only ever descends from the story stop to the landing stop', () => {
+    const tail = MOBILE_FLIGHT_STOPS.slice(MOBILE_FLIGHT_STOPS.findIndex((stop) => stop.selector === '.scroll-story'));
+    for (let index = 1; index < tail.length; index += 1) {
+      expect(tail[index].pose.y).toBeGreaterThanOrEqual(tail[index - 1].pose.y);
     }
   });
 
-  it('leaves fields it does not animate untouched', () => {
-    const pose = hoverPose(base, 3.14);
-    expect(pose.width).toBe(base.width);
-    expect(pose.rotationX).toBe(base.rotationX);
+  // Desktop's landing clears `.contact-intro p:last-of-type`, but on the stacked mobile layout the
+  // form panel sits below that paragraph, not open air — see the comment on the `#contacto` stop.
+  it('parks below the contact form panel, not the intro paragraph', () => {
+    const contact = MOBILE_FLIGHT_STOPS.find((stop) => stop.selector === '#contacto');
+    expect(contact?.clearBelow).toBe('.contact-form-panel');
+    expect(contact?.pose).toBe(MOBILE_LANDING_POSE);
+    expect(contact?.align).toBeGreaterThan(0.2);
+    expect(contact?.align).toBeLessThan(0.4);
   });
 });
 
-describe('hoverLook', () => {
-  it('is bounded regardless of how much time has passed', () => {
-    for (let time = 0; time < 500; time += 3.3) {
-      const look = hoverLook(time);
-      expect(Math.abs(look.yaw)).toBeLessThan(0.3);
-      expect(Math.abs(look.pitch)).toBeLessThan(0.3);
+// `parkedPoseY`/`flightPose` are the same pure functions desktop's landing already relies on (see
+// "parking the drone on the page" above) — reused here with the mobile landing's own width to
+// confirm they still hold below an arbitrary panel bottom, without hardcoding a device measurement
+// nobody has taken from a mobile browser yet (see the report to the requester for that gap).
+describe('parking the mobile drone below the form panel', () => {
+  const parked = MOBILE_FLIGHT_STOPS[MOBILE_FLIGHT_STOPS.length - 1];
+  const WIDTH = parked.pose.width;
+  // `.contact-form-panel{min-height:490px}` is the real mobile CSS rule (see app/globals.css); the
+  // 40px is `PARK_GAP`, the same breathing room desktop's landing adds below its own clear line.
+  const CLEAR = 490 + 40;
+  const topEdge = (y: number, width: number) => y - 0.37 * width;
+
+  it('rests at a fixed place inside the section, not a fixed place on the screen', () => {
+    const framed = parkedPoseY(0, CLEAR, WIDTH, 800);
+    const scrolledOn = parkedPoseY(-200, CLEAR, WIDTH, 800);
+    expect(scrolledOn).toBeCloseTo(framed - 200 / 800);
+  });
+
+  it('clears the form panel at every viewport height', () => {
+    for (const viewportHeight of [600, 664, 800, 854, 1080]) {
+      const y = parkedPoseY(0, CLEAR, WIDTH, viewportHeight);
+      expect(topEdge(y, WIDTH) * viewportHeight).toBeGreaterThan(490);
     }
   });
 
-  it('depends only on time — the same instant always looks the same way', () => {
-    expect(hoverLook(4.2)).toEqual(hoverLook(4.2));
-  });
-
-  it('is not the zero-motion vector — the gimbal actually scans while hovering', () => {
-    const looks = [0, 1, 2, 3, 4, 5].map(hoverLook);
-    expect(looks.some((look) => Math.abs(look.yaw) > 0.01 || Math.abs(look.pitch) > 0.01)).toBe(true);
-  });
-});
-
-describe('HOVER_ROTOR_SPEED', () => {
-  it('is a real positive idle speed, not the flight function evaluated at rest', () => {
-    // `rotorTargetSpeed(0, 0)` is 0 by design — flight rotors only spin once the page scrolls.
-    // Hover has no scroll at all, so reusing that function would freeze the rotors on a drone
-    // that is otherwise visibly bobbing and drifting, which reads as broken, not parked.
-    expect(rotorTargetSpeed(0, 0)).toBe(0);
-    expect(HOVER_ROTOR_SPEED).toBeGreaterThan(0);
-  });
-
-  it('actually moves the rotors forward when stepped as the hover target', () => {
-    const frame = 0.016;
-    let speed = 0;
-    for (let i = 0; i < 60; i += 1) speed = stepRotorSpeed(speed, HOVER_ROTOR_SPEED, frame);
-    expect(speed).toBeGreaterThan(0);
-  });
-});
-
-describe('heroBandPose', () => {
-  it('keeps the drone within the open band above the copy, not inside it', () => {
-    const band = { top: 0, bottom: 180 };
-    const heroHeight = 760;
-    const pose = heroBandPose(band, heroHeight);
-    expect(pose.y).toBeGreaterThanOrEqual(band.top / heroHeight);
-    expect(pose.y).toBeLessThanOrEqual(band.bottom / heroHeight);
-  });
-
-  it('sizes the drone to fit inside a narrower band', () => {
-    const wide = heroBandPose({ top: 0, bottom: 400 }, 760);
-    const narrow = heroBandPose({ top: 0, bottom: 150 }, 760);
-    expect(narrow.width).toBeLessThanOrEqual(wide.width);
-  });
-
-  it('degrades to a finite, sane pose when the band is too small to be worth flying in', () => {
-    const pose = heroBandPose({ top: 40, bottom: 55 }, 760);
-    expect(Number.isFinite(pose.x)).toBe(true);
-    expect(Number.isFinite(pose.y)).toBe(true);
-    expect(pose.width).toBeGreaterThan(0);
-  });
-
-  it('degrades to a finite, sane pose when the hero could not be measured', () => {
-    const pose = heroBandPose({ top: 0, bottom: 400 }, 0);
-    expect(Number.isFinite(pose.x)).toBe(true);
-    expect(Number.isFinite(pose.y)).toBe(true);
-    expect(pose.width).toBeGreaterThan(0);
-  });
-});
-
-// Regression: `.hero-topline` paints with no `z-index` (see the CSS comment on `.drone-scene`), so
-// it renders BELOW the drone (`z-index:2`). The open band the hovering drone flies in used to start
-// at the hero's own top edge (`top: 0`), which on a real mobile layout (`.site-header` ~90px,
-// `.hero-topline` at `top:118px`) sits the drone directly on top of the topline text.
-describe('heroBandTop', () => {
-  it('starts the band below the topline, not at the hero edge', () => {
-    // A realistic mobile measurement: hero starts at viewport y=90 (below the fixed header), the
-    // topline sits at hero-relative top:118px and is ~20px tall, so its bottom edge is at
-    // viewport y = 90 + 118 + 20 = 228.
-    const heroTop = 90;
-    const toplineBottom = 228;
-    expect(heroBandTop(toplineBottom, heroTop)).toBeCloseTo(138); // 228 - 90
-    expect(heroBandTop(toplineBottom, heroTop)).toBeGreaterThan(0);
-  });
-
-  it('degrades to the hero edge when the topline could not be measured', () => {
-    expect(heroBandTop(null, 90)).toBe(0);
-  });
-
-  it('never goes negative even if the topline measured above the hero top', () => {
-    expect(heroBandTop(50, 90)).toBe(0);
-  });
-});
-
-describe('heroBandPose — kept clear of the topline', () => {
-  it('keeps the drone below the topline once the band starts under it', () => {
-    const heroHeight = 730;
-    const toplineBottom = heroBandTop(228, 90); // see heroBandTop tests above
-    const band = { top: toplineBottom, bottom: 300 };
-    const pose = heroBandPose(band, heroHeight);
-    expect(pose.y).toBeGreaterThanOrEqual(band.top / heroHeight);
+  it('degrades safely without a measurable viewport', () => {
+    expect(Number.isFinite(parkedPoseY(0, CLEAR, WIDTH, 0))).toBe(true);
   });
 });
 
@@ -1217,7 +1162,7 @@ describe('DroneScene — shadow flags', () => {
     expect(body.receiveShadow).toBe(true);
   });
 
-  it('leaves both shadow flags off in bounded hover mode, where the canvas disables shadows', () => {
+  it('leaves both shadow flags off in the lite tier, where the canvas disables shadows', () => {
     const body = mesh('Body');
     stubSceneWith([body]);
     (window as unknown as { requestIdleCallback: unknown }).requestIdleCallback = (callback: IdleRequestCallback) => {
