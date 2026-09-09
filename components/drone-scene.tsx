@@ -227,6 +227,16 @@ function damp(current: number, target: number, speed: number, delta: number) {
   return current + (target - current) * (1 - Math.exp(-speed * delta));
 }
 
+/**
+ * Damping is what gives the flight its weight, but it is exactly wrong for a parked drone: the
+ * target moves with the page every frame, so any lag reads as the drone sliding about instead of
+ * resting on the section. `exact` hands over from damped to rigid as the landing completes.
+ */
+export function follow(current: number, target: number, speed: number, delta: number, exact: number) {
+  const smooth = damp(current, target, speed, delta);
+  return smooth + (target - smooth) * clamp(exact);
+}
+
 function findNode(scene: Object3D, name: string) {
   return scene.getObjectByName(name) ?? undefined;
 }
@@ -236,9 +246,9 @@ type PointerRef = { current: { x: number; y: number } };
 function DroneModel({ pointer }: { pointer: PointerRef }) {
   const { scene } = useGLTF(MODEL_URL);
   const { viewport, size } = useThree();
-  const scrollProgress = useRef(0);
+  const maxScroll = useRef(1);
+  const anchorDocTop = useRef(Number.POSITIVE_INFINITY);
   const stops = useRef<ResolvedStop[]>([]);
-  const anchorTop = useRef(Number.POSITIVE_INFINITY);
   const clearBelow = useRef(0);
   const rotorSpeed = useRef(0);
   const nodes = useMemo(() => {
@@ -268,32 +278,22 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
       return { top: rect.top + window.scrollY, height: rect.height };
     };
     const parked = FLIGHT_STOPS[FLIGHT_STOPS.length - 1];
-    const trackAnchor = () => {
-      const element = parked.selector ? document.querySelector(parked.selector) : null;
-      if (!element) return;
-      const rect = element.getBoundingClientRect();
-      anchorTop.current = rect.top;
-      const copy = parked.clearBelow ? element.querySelector(parked.clearBelow) : null;
-      clearBelow.current = copy ? copy.getBoundingClientRect().bottom - rect.top + PARK_GAP : 0;
-    };
     let measuredHeight = 0;
     const remeasure = () => {
       measuredHeight = document.documentElement.scrollHeight;
-      const maxScroll = Math.max(1, measuredHeight - window.innerHeight);
-      scrollProgress.current = clamp(window.scrollY / maxScroll);
-      stops.current = resolveStopOffsets(FLIGHT_STOPS, measure, window.innerHeight, maxScroll);
-      trackAnchor();
+      maxScroll.current = Math.max(1, measuredHeight - window.innerHeight);
+      stops.current = resolveStopOffsets(FLIGHT_STOPS, measure, window.innerHeight, maxScroll.current);
+      const element = parked.selector ? document.querySelector(parked.selector) : null;
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      anchorDocTop.current = rect.top + window.scrollY;
+      const copy = parked.clearBelow ? element.querySelector(parked.clearBelow) : null;
+      clearBelow.current = copy ? copy.getBoundingClientRect().bottom - rect.top + PARK_GAP : 0;
     };
     const onScroll = () => {
       // Lazy-loaded posters keep changing the page height as the reader travels down it, which
       // would leave every stop anchored to a document that no longer exists.
-      if (document.documentElement.scrollHeight !== measuredHeight) {
-        remeasure();
-        return;
-      }
-      const maxScroll = Math.max(1, measuredHeight - window.innerHeight);
-      scrollProgress.current = clamp(window.scrollY / maxScroll);
-      trackAnchor();
+      if (document.documentElement.scrollHeight !== measuredHeight) remeasure();
     };
     remeasure();
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -308,12 +308,15 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
   }, []);
 
   useFrame((_, delta) => {
-    const progress = scrollProgress.current;
+    // Read the scroll here rather than in a listener: a parked drone that is one frame behind
+    // the page is a drone that visibly slides.
+    const scrolled = window.scrollY;
+    const progress = clamp(scrolled / maxScroll.current);
     const { pose, landing } = interpolatePose(stops.current, progress);
     // The final destination is a spot on the page, so it is resolved from the live layout rather
     // than baked into the pose; LANDING_POSE.y only stands in until the section can be measured.
-    const parked = Number.isFinite(anchorTop.current)
-      ? parkedPoseY(anchorTop.current, clearBelow.current, pose.width, size.height)
+    const parked = Number.isFinite(anchorDocTop.current)
+      ? parkedPoseY(anchorDocTop.current - scrolled, clearBelow.current, pose.width, size.height)
       : pose.y;
     const held = pose.y + (parked - pose.y) * landing;
     const target = poseToWorld({ ...pose, y: held }, viewport.width, viewport.height);
@@ -322,12 +325,12 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
     const yaw = nodes.yaw;
     const pitch = nodes.pitch;
 
-    root.position.x = damp(root.position.x, target.x, 2.8, delta);
-    root.position.y = damp(root.position.y, target.y, 2.8, delta);
+    root.position.x = follow(root.position.x, target.x, 2.8, delta, landing);
+    root.position.y = follow(root.position.y, target.y, 2.8, delta, landing);
     root.rotation.x = damp(root.rotation.x, pose.rotationX, 2.8, delta);
     root.rotation.y = damp(root.rotation.y, pose.rotationY, 2.8, delta);
     root.rotation.z = damp(root.rotation.z, pose.rotationZ, 2.8, delta);
-    root.scale.setScalar(damp(root.scale.x, target.scale, 2.8, delta));
+    root.scale.setScalar(follow(root.scale.x, target.scale, 2.8, delta, landing));
     if (yaw) yaw.rotation.y = damp(yaw.rotation.y, look.yaw, 5, delta);
     if (pitch) pitch.rotation.x = damp(pitch.rotation.x, look.pitch, 5, delta);
 

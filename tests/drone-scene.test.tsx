@@ -9,6 +9,7 @@ import {
   GIMBAL_LANDING_YAW,
   LANDING_POSE,
   interpolatePose,
+  follow,
   parkedPoseY,
   poseToWorld,
   pointerLook,
@@ -296,6 +297,35 @@ describe('parking the drone on the page', () => {
 
   it('degrades safely without a measurable viewport', () => {
     expect(Number.isFinite(parkedPoseY(0, CLEAR, WIDTH, 0))).toBe(true);
+  });
+});
+
+describe('follow', () => {
+  const frame = 0.016;
+
+  it('damps normally while the drone is flying', () => {
+    const flown = follow(0, 10, 2.8, frame, 0);
+    expect(flown).toBeGreaterThan(0);
+    expect(flown).toBeLessThan(10);
+  });
+
+  it('tracks the target exactly once parked', () => {
+    // A parked drone belongs to the page, so any lag reads as the drone sliding around.
+    expect(follow(0, 10, 2.8, frame, 1)).toBe(10);
+    expect(follow(-4, 2.5, 2.8, frame, 1)).toBe(2.5);
+  });
+
+  it('hands over gradually so the landing has no seam', () => {
+    const damped = follow(0, 10, 2.8, frame, 0);
+    const half = follow(0, 10, 2.8, frame, 0.5);
+    expect(half).toBeGreaterThan(damped);
+    expect(half).toBeLessThan(10);
+    expect(half).toBeCloseTo(damped + (10 - damped) * 0.5);
+  });
+
+  it('does not overshoot when the target is already reached', () => {
+    expect(follow(5, 5, 2.8, frame, 0)).toBeCloseTo(5);
+    expect(follow(5, 5, 2.8, frame, 1)).toBe(5);
   });
 });
 
