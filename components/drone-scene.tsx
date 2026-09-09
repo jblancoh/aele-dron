@@ -7,12 +7,20 @@ import { useGLTF } from '@react-three/drei';
 import type { Object3D } from 'three';
 import { useMotion } from './motion-context';
 
-const MODEL_URL = '/media/drone/aele-graphite-drone.glb';
+const MODEL_URL = '/media/drone/aele-white-drone.glb';
 const ROTOR_NAMES = ['Rotor_FL', 'Rotor_FR', 'Rotor_RL', 'Rotor_RR'];
 
-/** The camera sits slightly above the origin, so screen centre maps to this world height. */
-export const CAMERA_Y = 0.75;
-/** Effective on-screen width of the model at scale 1, in world units (measured from the GLB). */
+/**
+ * React Three Fiber aims the default camera at the origin (it calls `camera.lookAt(0, 0, 0)`
+ * unless a rotation is supplied), so the centre of the screen is world zero. Lifting the camera
+ * without accounting for that tilt shifts every pose upward by the camera's height.
+ */
+export const CAMERA_Y = 0;
+/**
+ * Effective on-screen width of the model at scale 1, in world units. Measured by projecting the
+ * GLB's vertices through this camera, so it accounts for perspective and the body rotation, not
+ * just the raw bounding box. Re-measure it if the model is swapped.
+ */
 const DRONE_WIDTH_WORLD = 4;
 
 /**
@@ -31,7 +39,22 @@ export type DronePose = {
 };
 
 /** A pose anchored to a real element, so the flight follows the layout instead of guessed scroll fractions. */
-export type FlightStop = { selector: string | null; pose: DronePose };
+export type FlightStop = {
+  selector: string | null;
+  pose: DronePose;
+  /**
+   * Selector, inside the anchor element, whose bottom edge the parked drone must sit below.
+   * Measured live, so the drone follows the copy if it is ever rewritten.
+   */
+  clearBelow?: string;
+  /**
+   * Where the element's top should sit, as a fraction of the viewport height, when the drone
+   * reaches this stop. Omit it to reach the stop with the element centred — which is far too
+   * late for a tall section near the end of the page, because "centred" only happens once the
+   * section is already scrolling away.
+   */
+  align?: number;
+};
 
 /** Parked beside the contact form: low on the left, small, turned to watch the panel. */
 export const LANDING_POSE: DronePose = {
@@ -48,7 +71,9 @@ export const LANDING_POSE: DronePose = {
  * `rotationY` turns the drone's camera toward screen-left, positive toward screen-right.
  */
 export const FLIGHT_STOPS: FlightStop[] = [
-  { selector: null, pose: { x: 0.5, y: 0.5, width: 0.46, rotationX: 0.04, rotationY: -0.1, rotationZ: 0 } },
+  // The hero copy is centred and runs from the eyebrow at ~33vh to the actions near the bottom,
+  // so the drone holds the band between the header rule and the eyebrow instead of crossing it.
+  { selector: null, pose: { x: 0.5, y: 0.28, width: 0.32, rotationX: 0.05, rotationY: -0.1, rotationZ: 0 } },
   // Every film stays pinned left, so the drone holds the right lane and watches across, and the
   // three stops share a height to read as one steady pass rather than three separate hops.
   { selector: '.film-0', pose: { x: 0.78, y: 0.5, width: 0.3, rotationX: 0.06, rotationY: -0.52, rotationZ: -0.07 } },
@@ -58,7 +83,11 @@ export const FLIGHT_STOPS: FlightStop[] = [
   { selector: '.scroll-story', pose: { x: 0.84, y: 0.24, width: 0.18, rotationX: 0.06, rotationY: -0.44, rotationZ: -0.05 } },
   // Services keeps its copy top-left and its list on the right; the drone drops under the copy.
   { selector: '#nosotros', pose: { x: 0.24, y: 0.74, width: 0.34, rotationX: 0.04, rotationY: 0.26, rotationZ: 0.03 } },
-  { selector: '#contacto', pose: LANDING_POSE },
+  // Two stops on the contact section: the drone is still airborne as it scrolls in, then sets
+  // down while the form is fully framed instead of drifting across the headline all the way to
+  // the page bottom.
+  { selector: '#contacto', align: 0.85, pose: { x: 0.3, y: 0.42, width: 0.34, rotationX: 0.05, rotationY: 0.2, rotationZ: -0.04 } },
+  { selector: '#contacto', align: 0.28, clearBelow: '.contact-intro p:last-of-type', pose: LANDING_POSE },
 ];
 
 /** Gimbal aim held once parked, on top of the body rotation, so the camera stays on the form. */
@@ -66,6 +95,10 @@ export const GIMBAL_LANDING_YAW = 0.28;
 export const GIMBAL_LANDING_PITCH = 0.05;
 
 const CRUISE_SPEED = 28;
+/** Fraction of the page over which the rotors wind up from rest, so the flight has a start. */
+const TAKEOFF_SPAN = 0.05;
+/** Breathing room between the copy the drone parks under and the drone itself, in pixels. */
+const PARK_GAP = 40;
 const ROTOR_SPIN_UP = 3.6;
 const ROTOR_SPIN_DOWN = 1.6;
 const ROTOR_STOP_EPSILON = 0.03;
@@ -93,8 +126,11 @@ export function resolveStopOffsets(
     }
     const rect = measure(stop.selector);
     if (!rect) continue;
-    const centred = rect.top + rect.height / 2 - viewportHeight / 2;
-    resolved.push({ at: clamp(centred / span), pose: stop.pose });
+    const scrollAt =
+      stop.align === undefined
+        ? rect.top + rect.height / 2 - viewportHeight / 2
+        : rect.top - stop.align * viewportHeight;
+    resolved.push({ at: clamp(scrollAt / span), pose: stop.pose });
   }
   return resolved.sort((a, b) => a.at - b.at);
 }
@@ -129,6 +165,29 @@ export function interpolatePose(stops: ResolvedStop[], progress: number) {
   };
 }
 
+/**
+ * Where the model's silhouette sits relative to its origin, as multiples of the pose width.
+ * Measured by projecting the GLB through this camera.
+ */
+const DRONE_TOP_RATIO = 0.37;
+
+/**
+ * Resting place of the parked drone, as a viewport fraction. The section's copy is laid out in
+ * pixels while poses are viewport fractions, so a fixed fraction cannot clear the same text on a
+ * short laptop and a tall monitor. Anchoring to the section's own pixels does, and because the
+ * spot is measured from the section's live top edge the drone also scrolls away with the page
+ * instead of staying glued to the screen.
+ */
+export function parkedPoseY(
+  anchorTop: number,
+  clearBelow: number,
+  width: number,
+  viewportHeight: number,
+) {
+  if (viewportHeight <= 0) return 0.5;
+  return (anchorTop + clearBelow) / viewportHeight + DRONE_TOP_RATIO * width;
+}
+
 /** Convert a viewport-space pose into the world transform the model needs. */
 export function poseToWorld(pose: DronePose, worldWidth: number, worldHeight: number) {
   return {
@@ -139,8 +198,9 @@ export function poseToWorld(pose: DronePose, worldWidth: number, worldHeight: nu
 }
 
 export function rotorTargetSpeed(progress: number, landing: number) {
+  const takeoff = clamp(clamp(progress) / TAKEOFF_SPAN);
   const flight = CRUISE_SPEED * (0.8 + clamp(progress) * 0.2);
-  return flight * (1 - clamp(landing));
+  return flight * takeoff * (1 - clamp(landing));
 }
 
 /** Motors gain speed quickly under power and lose it slowly to inertia. */
@@ -175,10 +235,12 @@ type PointerRef = { current: { x: number; y: number } };
 
 function DroneModel({ pointer }: { pointer: PointerRef }) {
   const { scene } = useGLTF(MODEL_URL);
-  const { viewport } = useThree();
+  const { viewport, size } = useThree();
   const scrollProgress = useRef(0);
   const stops = useRef<ResolvedStop[]>([]);
-  const rotorSpeed = useRef(rotorTargetSpeed(0, 0));
+  const anchorTop = useRef(Number.POSITIVE_INFINITY);
+  const clearBelow = useRef(0);
+  const rotorSpeed = useRef(0);
   const nodes = useMemo(() => {
     const droneRoot = findNode(scene, 'DroneRoot') ?? scene;
     return {
@@ -205,22 +267,41 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
       const rect = element.getBoundingClientRect();
       return { top: rect.top + window.scrollY, height: rect.height };
     };
+    const parked = FLIGHT_STOPS[FLIGHT_STOPS.length - 1];
+    const trackAnchor = () => {
+      const element = parked.selector ? document.querySelector(parked.selector) : null;
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      anchorTop.current = rect.top;
+      const copy = parked.clearBelow ? element.querySelector(parked.clearBelow) : null;
+      clearBelow.current = copy ? copy.getBoundingClientRect().bottom - rect.top + PARK_GAP : 0;
+    };
+    let measuredHeight = 0;
     const remeasure = () => {
-      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      measuredHeight = document.documentElement.scrollHeight;
+      const maxScroll = Math.max(1, measuredHeight - window.innerHeight);
       scrollProgress.current = clamp(window.scrollY / maxScroll);
       stops.current = resolveStopOffsets(FLIGHT_STOPS, measure, window.innerHeight, maxScroll);
+      trackAnchor();
     };
     const onScroll = () => {
-      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      // Lazy-loaded posters keep changing the page height as the reader travels down it, which
+      // would leave every stop anchored to a document that no longer exists.
+      if (document.documentElement.scrollHeight !== measuredHeight) {
+        remeasure();
+        return;
+      }
+      const maxScroll = Math.max(1, measuredHeight - window.innerHeight);
       scrollProgress.current = clamp(window.scrollY / maxScroll);
+      trackAnchor();
     };
     remeasure();
-    // The layout settles after fonts and posters load, so take a second reading.
-    const settle = window.setTimeout(remeasure, 1200);
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', remeasure, { passive: true });
+    const observer = new ResizeObserver(remeasure);
+    observer.observe(document.body);
     return () => {
-      window.clearTimeout(settle);
+      observer.disconnect();
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', remeasure);
     };
@@ -229,7 +310,13 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
   useFrame((_, delta) => {
     const progress = scrollProgress.current;
     const { pose, landing } = interpolatePose(stops.current, progress);
-    const target = poseToWorld(pose, viewport.width, viewport.height);
+    // The final destination is a spot on the page, so it is resolved from the live layout rather
+    // than baked into the pose; LANDING_POSE.y only stands in until the section can be measured.
+    const parked = Number.isFinite(anchorTop.current)
+      ? parkedPoseY(anchorTop.current, clearBelow.current, pose.width, size.height)
+      : pose.y;
+    const held = pose.y + (parked - pose.y) * landing;
+    const target = poseToWorld({ ...pose, y: held }, viewport.width, viewport.height);
     const look = pointerLook(pointer.current, landing);
     const root = nodes.root;
     const yaw = nodes.yaw;

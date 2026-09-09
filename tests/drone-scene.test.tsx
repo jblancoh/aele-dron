@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useGLTF } from '@react-three/drei';
 import {
   CAMERA_Y,
   DroneScene,
@@ -8,6 +9,7 @@ import {
   GIMBAL_LANDING_YAW,
   LANDING_POSE,
   interpolatePose,
+  parkedPoseY,
   poseToWorld,
   pointerLook,
   resolveStopOffsets,
@@ -22,9 +24,10 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: () => undefined,
   useThree: () => ({ viewport: { width: 10, height: 6 }, size: { width: 1000, height: 600 } }),
 }));
-vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(() => ({ scene: { getObjectByName: () => undefined } }), { preload: () => undefined }) }));
+vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(vi.fn(() => ({ scene: { getObjectByName: () => undefined } })), { preload: () => undefined }) }));
 
 afterEach(() => {
+  vi.clearAllMocks();
   motion.desktop = false;
   motion.paused = false;
   motion.reduced = false;
@@ -32,6 +35,12 @@ afterEach(() => {
 });
 
 describe('DroneScene', () => {
+  it('loads the approved white drone asset on eligible devices', () => {
+    motion.desktop = true;
+    render(<DroneScene />);
+    expect(useGLTF).toHaveBeenCalledWith('/media/drone/aele-white-drone.glb');
+  });
+
   it('renders nothing at all when motion is not eligible', () => {
     const { container } = render(<DroneScene />);
     expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
@@ -52,10 +61,13 @@ describe('poseToWorld', () => {
   const view = { width: 10, height: 6 };
   const pose = (x: number, y: number, width = 0.25) => ({ x, y, width, rotationX: 0, rotationY: 0, rotationZ: 0 });
 
-  it('puts a centred pose on the camera axis', () => {
+  it('puts a centred pose on the point the camera aims at', () => {
+    // React Three Fiber points the default camera at the origin, so screen centre is world zero.
+    // Assuming otherwise offsets every pose vertically by the camera height.
+    expect(CAMERA_Y).toBe(0);
     const world = poseToWorld(pose(0.5, 0.5), view.width, view.height);
     expect(world.x).toBeCloseTo(0);
-    expect(world.y).toBeCloseTo(CAMERA_Y);
+    expect(world.y).toBeCloseTo(0);
   });
 
   it('maps viewport fractions onto the visible world extent', () => {
@@ -108,6 +120,19 @@ describe('resolveStopOffsets', () => {
     const resolved = resolveStopOffsets(shuffled, measure, 600, 5000);
     const order = resolved.map((stop) => stop.at);
     expect(order).toEqual(order.slice().sort((a, b) => a - b));
+  });
+
+  it('reaches an aligned stop when its element sits at the requested height', () => {
+    const aligned = [{ selector: '.end', pose: LANDING_POSE, align: 0.2 }];
+    const [stop] = resolveStopOffsets(aligned, measure, 600, 5000);
+    // Element top 4000, reached once it sits 0.2 * 600 = 120px below the top of the viewport.
+    expect(stop.at).toBeCloseTo((4000 - 120) / 5000);
+  });
+
+  it('reaches an aligned stop earlier than the centred default', () => {
+    const centred = resolveStopOffsets([{ selector: '.end', pose: LANDING_POSE }], measure, 600, 5000);
+    const early = resolveStopOffsets([{ selector: '.end', pose: LANDING_POSE, align: 0.15 }], measure, 600, 5000);
+    expect(early[0].at).toBeLessThan(centred[0].at);
   });
 
   it('survives a page that cannot scroll', () => {
@@ -199,6 +224,38 @@ describe('FLIGHT_STOPS', () => {
     }
   });
 
+  it('finishes the landing while the contact form is still framed', () => {
+    const contact = FLIGHT_STOPS.filter((stop) => stop.selector === '#contacto');
+    // An approach stop then the parked stop, so the descent is a move rather than a long drift.
+    expect(contact).toHaveLength(2);
+    expect(contact[1].pose).toBe(LANDING_POSE);
+    // The parked stop is reached well before the page bottom, not at the very end of the scroll.
+    expect(contact[1].align).toBeDefined();
+    // Parked while the section is still high in the viewport, not at the page bottom.
+    expect(contact[1].align!).toBeGreaterThan(0.2);
+    expect(contact[1].align!).toBeLessThan(0.4);
+    expect(contact[0].align!).toBeGreaterThan(contact[1].align!);
+  });
+
+  it('is already parked once the contact section is framed', () => {
+    const stops = resolveStopOffsets(
+      FLIGHT_STOPS,
+      (selector) => (selector === '#contacto' ? { top: 6076, height: 745 } : { top: 5189, height: 738 }),
+      849,
+      6364,
+    );
+    // Matches the reported scroll position where the form is fully in view.
+    const framed = (6076 - 0.14 * 849) / 6364;
+    expect(interpolatePose(stops, framed).landing).toBe(1);
+  });
+
+  it('keeps the hero drone clear of the centred hero copy', () => {
+    const hero = FLIGHT_STOPS[0];
+    expect(hero.selector).toBeNull();
+    // The copy starts around a third of the way down, so the drone stays above it.
+    expect(hero.pose.y + hero.pose.width / 4).toBeLessThan(0.4);
+  });
+
   it('lands low on the left, turned toward the contact form', () => {
     expect(LANDING_POSE.y).toBeGreaterThan(0.6);
     expect(LANDING_POSE.x).toBeLessThan(0.5);
@@ -206,7 +263,58 @@ describe('FLIGHT_STOPS', () => {
   });
 });
 
+describe('parking the drone on the page', () => {
+  const parked = FLIGHT_STOPS[FLIGHT_STOPS.length - 1];
+  // Measured inside the contact section: the intro paragraph ends 386px below the section top.
+  const CLEAR = 386 + 40;
+  const WIDTH = parked.pose.width;
+  const topEdge = (y: number, width: number) => y - 0.37 * width;
+
+  it('rests at a fixed place inside the section, not a fixed place on the screen', () => {
+    expect(parked.clearBelow).toBeDefined();
+    const framed = parkedPoseY(0, CLEAR, WIDTH, 800);
+    const scrolledOn = parkedPoseY(-200, CLEAR, WIDTH, 800);
+    // Scrolling 200px moves the drone 200px up the screen — it holds station on the page.
+    expect(scrolledOn).toBeCloseTo(framed - 200 / 800);
+  });
+
+  it('clears the intro copy at every viewport height', () => {
+    for (const viewportHeight of [600, 664, 800, 854, 1080, 1440]) {
+      const y = parkedPoseY(0, CLEAR, WIDTH, viewportHeight);
+      // The drone's top edge stays below the paragraph, whatever the viewport shape.
+      expect(topEdge(y, WIDTH) * viewportHeight).toBeGreaterThan(386);
+    }
+  });
+
+  it('stays inside the section rather than sliding onto the footer', () => {
+    const SECTION = 745;
+    for (const viewportHeight of [664, 854, 1080]) {
+      const y = parkedPoseY(0, CLEAR, WIDTH, viewportHeight);
+      expect((y + 0.162 * WIDTH) * viewportHeight).toBeLessThan(SECTION);
+    }
+  });
+
+  it('degrades safely without a measurable viewport', () => {
+    expect(Number.isFinite(parkedPoseY(0, CLEAR, WIDTH, 0))).toBe(true);
+  });
+});
+
 describe('rotorTargetSpeed', () => {
+  it('holds the rotors still until the page is scrolled', () => {
+    expect(rotorTargetSpeed(0, 0)).toBe(0);
+  });
+
+  it('spins the rotors up as the first scroll begins', () => {
+    const early = [0.005, 0.01, 0.02, 0.04].map((progress) => rotorTargetSpeed(progress, 0));
+    for (let index = 1; index < early.length; index += 1) {
+      expect(early[index]).toBeGreaterThan(early[index - 1]);
+    }
+    expect(early[0]).toBeGreaterThan(0);
+    // Cruising revs are reached quickly, well inside the hero.
+    expect(rotorTargetSpeed(0.06, 0)).toBeCloseTo(rotorTargetSpeed(0.06, 0));
+    expect(rotorTargetSpeed(0.08, 0)).toBeGreaterThan(rotorTargetSpeed(0.04, 0) * 0.9);
+  });
+
   it('keeps the rotors spinning at the end of the scroll when no landing is underway', () => {
     expect(rotorTargetSpeed(1, 0)).toBeGreaterThan(0);
   });
