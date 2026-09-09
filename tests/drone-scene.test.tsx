@@ -9,6 +9,7 @@ import {
   GIMBAL_LANDING_YAW,
   LANDING_POSE,
   interpolatePose,
+  flightPose,
   follow,
   parkedPoseY,
   poseToWorld,
@@ -227,15 +228,24 @@ describe('FLIGHT_STOPS', () => {
 
   it('finishes the landing while the contact form is still framed', () => {
     const contact = FLIGHT_STOPS.filter((stop) => stop.selector === '#contacto');
-    // An approach stop then the parked stop, so the descent is a move rather than a long drift.
-    expect(contact).toHaveLength(2);
-    expect(contact[1].pose).toBe(LANDING_POSE);
+    // One stop, not two. An approach stop between the services section and the parking spot has
+    // to lift the drone back up the screen before it can drop again, and that reversal is the
+    // visible jolt as section three hands over to section four.
+    expect(contact).toHaveLength(1);
+    expect(contact[0].pose).toBe(LANDING_POSE);
     // The parked stop is reached well before the page bottom, not at the very end of the scroll.
-    expect(contact[1].align).toBeDefined();
+    expect(contact[0].align).toBeDefined();
     // Parked while the section is still high in the viewport, not at the page bottom.
-    expect(contact[1].align!).toBeGreaterThan(0.2);
-    expect(contact[1].align!).toBeLessThan(0.4);
-    expect(contact[0].align!).toBeGreaterThan(contact[1].align!);
+    expect(contact[0].align!).toBeGreaterThan(0.2);
+    expect(contact[0].align!).toBeLessThan(0.4);
+  });
+
+  it('never sends the drone back up the screen once it starts settling', () => {
+    // Poses after the story are read top to bottom: the flight only ever descends from there.
+    const tail = FLIGHT_STOPS.slice(FLIGHT_STOPS.findIndex((stop) => stop.selector === '.scroll-story'));
+    for (let index = 1; index < tail.length; index += 1) {
+      expect(tail[index].pose.y).toBeGreaterThanOrEqual(tail[index - 1].pose.y);
+    }
   });
 
   it('is already parked once the contact section is framed', () => {
@@ -297,6 +307,76 @@ describe('parking the drone on the page', () => {
 
   it('degrades safely without a measurable viewport', () => {
     expect(Number.isFinite(parkedPoseY(0, CLEAR, WIDTH, 0))).toBe(true);
+  });
+});
+
+describe('flying from the services section into the contact form', () => {
+  // A real measurement of the page on an 849px-tall viewport, the layout the jolt was reported on.
+  const LAYOUT: Record<string, { top: number; height: number }> = {
+    '.film-0': { top: 1500, height: 520 },
+    '.film-1': { top: 2120, height: 520 },
+    '.film-2': { top: 2740, height: 520 },
+    '.scroll-story': { top: 3321, height: 1868 },
+    '#nosotros': { top: 5189, height: 738 },
+    '#contacto': { top: 6076, height: 745 },
+  };
+  const VIEWPORT = 849;
+  const MAX_SCROLL = 6364;
+  // The intro paragraph ends 386px below the section top, plus the parking gap.
+  const PARKED = { docTop: LAYOUT['#contacto'].top, clearBelow: 386 + 40 };
+  const stops = resolveStopOffsets(FLIGHT_STOPS, (selector) => LAYOUT[selector] ?? null, VIEWPORT, MAX_SCROLL);
+  const screenY = (scrolled: number) =>
+    flightPose(stops, scrolled, MAX_SCROLL, VIEWPORT, PARKED).pose.y * VIEWPORT;
+  /** How far the drone slides across the screen for every pixel the reader scrolls. */
+  const screenSpeed = (scrolled: number) => screenY(scrolled + 1) - screenY(scrolled);
+  // The story stop is reached with the full-bleed section centred; the descent runs from there.
+  const storyStop = LAYOUT['.scroll-story'].top + LAYOUT['.scroll-story'].height / 2 - VIEWPORT / 2;
+  const lastStop = stops[stops.length - 1].at * MAX_SCROLL;
+
+  it('only ever descends, from the story all the way to the parking spot', () => {
+    // Reversing direction mid-flight is what reads as a jump: the drone climbs toward one stop
+    // and then dives toward the next, and the reader sees the corner between the two.
+    for (let scrolled = storyStop; scrolled < lastStop; scrolled += 4) {
+      expect(screenSpeed(scrolled)).toBeGreaterThan(-0.02);
+    }
+  });
+
+  it('holds one steady pace instead of lurching', () => {
+    for (let scrolled = storyStop; scrolled < lastStop; scrolled += 4) {
+      // Anything past 1 means the drone crosses the screen faster than the page scrolls under it.
+      expect(screenSpeed(scrolled)).toBeLessThan(0.6);
+    }
+  });
+
+  it('never jolts as one stop hands over to the next', () => {
+    for (let scrolled = storyStop; scrolled < lastStop - 8; scrolled += 4) {
+      // A stop boundary may change the pace, but not reverse or multiply it in a single frame.
+      expect(Math.abs(screenSpeed(scrolled + 4) - screenSpeed(scrolled))).toBeLessThan(0.25);
+    }
+  });
+
+  it('settles on the parking spot without overshooting it', () => {
+    const resting = screenY(lastStop);
+    for (let scrolled = storyStop; scrolled <= lastStop; scrolled += 4) {
+      expect(screenY(scrolled)).toBeLessThanOrEqual(resting + 0.5);
+    }
+    // Once parked the drone belongs to the page: scrolling on carries it up the screen with it.
+    expect(screenY(lastStop + 200)).toBeCloseTo(resting - 200, 0);
+  });
+
+  it('leaves the flight untouched before the final approach', () => {
+    // The document-space landing must not leak backwards into the poses above it.
+    for (const scrolled of [0, 1200, 2600, 3800]) {
+      const { pose, landing } = flightPose(stops, scrolled, MAX_SCROLL, VIEWPORT, PARKED);
+      expect(landing).toBe(0);
+      expect(pose.y).toBeCloseTo(interpolatePose(stops, scrolled / MAX_SCROLL).pose.y);
+    }
+  });
+
+  it('falls back to the pose height when the section cannot be measured', () => {
+    const { pose } = flightPose(stops, lastStop, MAX_SCROLL, VIEWPORT, null);
+    expect(pose.y).toBeCloseTo(LANDING_POSE.y);
+    expect(Number.isFinite(flightPose(stops, lastStop, MAX_SCROLL, 0, PARKED).pose.y)).toBe(true);
   });
 });
 

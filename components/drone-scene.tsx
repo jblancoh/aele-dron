@@ -83,10 +83,11 @@ export const FLIGHT_STOPS: FlightStop[] = [
   { selector: '.scroll-story', pose: { x: 0.84, y: 0.24, width: 0.18, rotationX: 0.06, rotationY: -0.44, rotationZ: -0.05 } },
   // Services keeps its copy top-left and its list on the right; the drone drops under the copy.
   { selector: '#nosotros', pose: { x: 0.24, y: 0.74, width: 0.34, rotationX: 0.04, rotationY: 0.26, rotationZ: 0.03 } },
-  // Two stops on the contact section: the drone is still airborne as it scrolls in, then sets
-  // down while the form is fully framed instead of drifting across the headline all the way to
-  // the page bottom.
-  { selector: '#contacto', align: 0.85, pose: { x: 0.3, y: 0.42, width: 0.34, rotationX: 0.05, rotationY: 0.2, rotationZ: -0.04 } },
+  // One stop on the contact section, so the whole tail of the flight is a single unbroken
+  // descent. An extra approach stop between the two sections looks tempting, but the drone is
+  // already low under the services copy and the contact section is a screen further down: any
+  // stop in between has to lift it back up before it can drop again, and that reversal is the
+  // jolt readers see as section three hands over to section four.
   { selector: '#contacto', align: 0.28, clearBelow: '.contact-intro p:last-of-type', pose: LANDING_POSE },
 ];
 
@@ -195,6 +196,39 @@ export function poseToWorld(pose: DronePose, worldWidth: number, worldHeight: nu
     y: CAMERA_Y + (0.5 - pose.y) * worldHeight,
     scale: (pose.width * worldWidth) / DRONE_WIDTH_WORLD,
   };
+}
+
+/**
+ * The pose for a scroll position, with the parked height already resolved.
+ *
+ * The last stop is a spot on the page rather than on the screen, so the final approach has to be
+ * blended in document coordinates. Mixing a page-anchored target into a viewport-space pose with
+ * a linear weight hits the same two ends but curves badly in between: the target climbs the
+ * screen exactly as fast as the reader scrolls, so an early weight of it drags the drone into a
+ * dive and a late one lets it float back up. That parabola is a visible dive-and-recover. Blended
+ * in document space the descent runs at one steady speed from the previous stop to the spot.
+ */
+export function flightPose(
+  stops: ResolvedStop[],
+  scrolled: number,
+  maxScroll: number,
+  viewportHeight: number,
+  parked: { docTop: number; clearBelow: number } | null,
+) {
+  const span = Math.max(1, maxScroll);
+  const { pose, landing } = interpolatePose(stops, scrolled / span);
+  const approach = stops[stops.length - 2];
+  if (!parked || !approach || landing <= 0 || viewportHeight <= 0) return { pose, landing };
+  const parkedFraction = parkedPoseY(
+    parked.docTop - scrolled,
+    parked.clearBelow,
+    LANDING_POSE.width,
+    viewportHeight,
+  );
+  const parkedDocY = scrolled + parkedFraction * viewportHeight;
+  const startDocY = approach.at * span + approach.pose.y * viewportHeight;
+  const docY = startDocY + (parkedDocY - startDocY) * landing;
+  return { pose: { ...pose, y: (docY - scrolled) / viewportHeight }, landing };
 }
 
 export function rotorTargetSpeed(progress: number, landing: number) {
@@ -312,14 +346,13 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
     // the page is a drone that visibly slides.
     const scrolled = window.scrollY;
     const progress = clamp(scrolled / maxScroll.current);
-    const { pose, landing } = interpolatePose(stops.current, progress);
     // The final destination is a spot on the page, so it is resolved from the live layout rather
     // than baked into the pose; LANDING_POSE.y only stands in until the section can be measured.
     const parked = Number.isFinite(anchorDocTop.current)
-      ? parkedPoseY(anchorDocTop.current - scrolled, clearBelow.current, pose.width, size.height)
-      : pose.y;
-    const held = pose.y + (parked - pose.y) * landing;
-    const target = poseToWorld({ ...pose, y: held }, viewport.width, viewport.height);
+      ? { docTop: anchorDocTop.current, clearBelow: clearBelow.current }
+      : null;
+    const { pose, landing } = flightPose(stops.current, scrolled, maxScroll.current, size.height, parked);
+    const target = poseToWorld(pose, viewport.width, viewport.height);
     const look = pointerLook(pointer.current, landing);
     const root = nodes.root;
     const yaw = nodes.yaw;
