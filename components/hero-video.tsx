@@ -5,13 +5,22 @@ import { Pause,Play } from 'lucide-react';
 import { useMotion } from './motion-context';
 export function HeroVideo(){
  const ref=useRef<HTMLVideoElement>(null);
- const {paused,reduced,desktop,saveData,toggle}=useMotion();
+ const {paused,reduced,desktop,saveData,tier,toggle}=useMotion();
 
  const [failed,setFailed]=useState(false);
  const [blocked,setBlocked]=useState(false);
  const [manuallyStarted,setManuallyStarted]=useState(false);
  const allowVideo=!reduced&&desktop&&!saveData;
  const enabled=allowVideo||manuallyStarted;
+ // WCAG 2.2.2: any tier that can animate something (today the hero video on desktop, and once the
+ // drone ships in later phases the lite-tier drone too) must expose a way to stop it. Once the
+ // visitor has paused, the control must stay reachable regardless of tier so resuming is possible.
+ // `tier` alone misses one case: a reduced-motion visitor who manually starts the fallback video.
+ // Their tier stays 'none' (starting the video must not wake the global preference and, with it,
+ // the drone — see the play handler below), yet the video they just started is running and needs a
+ // way to be stopped. `enabled&&!failed` covers exactly that video-is-actually-running case.
+ const hasStoppableMotion=tier!=='none'||(enabled&&!failed);
+ const canStartVideo=(!enabled||blocked)&&!failed;
  useEffect(()=>{
   const video=ref.current;if(!video||!enabled||failed)return;
   let visible=true;
@@ -24,7 +33,14 @@ export function HeroVideo(){
   <img className="hero-media" src="/media/coast-poster.jpg" width="1280" height="720" fetchPriority="high" alt="Vista aérea de una bahía tropical; imagen de muestra, no filmada por AELE"/>
   {enabled&&!failed&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/coast-poster.jpg" src="/media/coast.mp4" aria-hidden="true" onError={()=>setFailed(true)}/>}
   <div className="motion-control">
-   {(!enabled||blocked)&&!failed?<button onClick={()=>{setManuallyStarted(true);setBlocked(false);if(paused)toggle();void ref.current?.play().catch(()=>setBlocked(true));}} aria-label="Reproducir video de fondo"><Play size={13}/> Reproducir fondo</button>:<button onClick={toggle} aria-pressed={paused} aria-label={paused?'Reanudar movimiento':'Pausar movimiento'}>{paused?<Play size={13}/>:<Pause size={13}/>} {paused?'Reanudar':'Pausar'}</button>}
+   {canStartVideo&&<button onClick={()=>{setManuallyStarted(true);setBlocked(false);
+     // Starting the fallback video also un-pauses the single shared motion preference. Since
+     // Phase 1 persists that preference to localStorage, this click now also writes 'on' to
+     // storage and wakes any motion gated on it (e.g. the drone) — not just this video. That is
+     // the correct behaviour under "one motion preference for the whole page", but it is a new
+     // observable effect now that the preference survives a reload.
+     if(paused)toggle();void ref.current?.play().catch(()=>setBlocked(true));}} aria-label="Reproducir video de fondo"><Play size={13}/> Reproducir fondo</button>}
+   {(hasStoppableMotion||paused)&&<button onClick={toggle} aria-pressed={paused} aria-label={paused?'Reanudar movimiento':'Pausar movimiento'}>{paused?<Play size={13}/>:<Pause size={13}/>} {paused?'Reanudar':'Pausar'}</button>}
   </div>
  </>;
 }

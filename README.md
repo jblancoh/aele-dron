@@ -30,6 +30,13 @@ The export is `dist/client`. Keep `.openai/hosting.json` bound to its existing S
 - The pause control stops automatic hero/scroll/gimbal motion. Pointer motion does not affect touch interactions or reduced-motion users.
 - Contact data remains in React memory. WhatsApp opens a prepared message for the visitor to review and send; no availability or reservation is implied.
 
+### 3D drone
+
+- The interactive drone renders in one of three motion tiers — `full` (desktop, fixed to the viewport, scroll-linked flight through the page), `lite` (mobile/tablet, a bounded hover canvas clipped to the hero), or `none` (nothing rendered). The tier is decided by measuring the running session, not by screen width: `prefers-reduced-motion`, Save-Data, an explicit visitor preference, and a runtime performance verdict (drei's `PerformanceMonitor`/`AdaptiveDpr`, plus a `webglcontextlost` listener) all feed into it. A device that starts on `lite` and then measurably struggles (or loses its WebGL context) degrades to `none` for the rest of that session; the verdict is remembered (with a version and a ~30-day TTL) so a later visit does not pay for the GLB fetch and a WebGL context only to fail again.
+- The visitor's motion preference (on/off) persists across visits, independently of that performance verdict — one is what the visitor asked for, the other is what the device can actually run.
+- The pause control stops the drone by freezing it in place (WCAG 2.2.2, Level A) rather than unmounting it, so resuming is instant and the composition never jumps. The control is reachable on mobile as well as desktop, alongside the existing "play background" action.
+- `.hero` must never receive `transform`, `filter`, `will-change`, or `contain`. Any of those creates a containing block for fixed-position descendants, and the desktop drone depends on staying `position:fixed` (while living inside `.hero` in the DOM) to escape `.hero`'s own `overflow:hidden` and cover the full viewport. Adding one of those properties would silently clip the desktop drone to the hero's box.
+
 ## Verification notes
 
 Unit/integration tests cover validation, message encoding, the unconfigured state, dialog focus/error handling, responsive motion and frame scheduling. Tests for the primary catalog/contact behavior were written and observed failing before implementation, then passed. Later review fixes include regression tests.

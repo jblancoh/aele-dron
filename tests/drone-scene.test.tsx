@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGLTF } from '@react-three/drei';
 import {
   CAMERA_Y,
@@ -7,7 +8,12 @@ import {
   FLIGHT_STOPS,
   GIMBAL_LANDING_PITCH,
   GIMBAL_LANDING_YAW,
+  HOVER_ROTOR_SPEED,
   LANDING_POSE,
+  heroBandPose,
+  heroBandTop,
+  hoverLook,
+  hoverPose,
   interpolatePose,
   flightPose,
   follow,
@@ -19,28 +25,95 @@ import {
   stepRotorSpeed,
 } from '../components/drone-scene';
 
-const motion = { paused: false, reduced: false, desktop: false, saveData: false };
-vi.mock('../components/motion-context', () => ({ useMotion: () => motion }));
-vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children }: { children: React.ReactNode }) => <div data-testid="drone-canvas">{children}</div>,
-  useFrame: () => undefined,
-  useThree: () => ({ viewport: { width: 10, height: 6 }, size: { width: 1000, height: 600 } }),
+type MockTier = 'full' | 'lite' | 'none';
+// `capabilityTier` is what the session could run if motion were switched on; it mirrors `tier`
+// unless a test sets it, which is exactly their relationship while the visitor has not paused.
+const motion: { paused: boolean; tier: MockTier; capabilityTier?: MockTier } = { paused: false, tier: 'none' };
+vi.mock('../components/motion-context', () => ({
+  useMotion: () => ({
+    paused: motion.paused,
+    tier: motion.tier,
+    capabilityTier: motion.capabilityTier ?? motion.tier,
+  }),
 }));
-vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(vi.fn(() => ({ scene: { getObjectByName: () => undefined } })), { preload: () => undefined }) }));
+const threeState = { viewport: { width: 10, height: 6 }, size: { width: 1000, height: 600 } };
+// A fake WebGL context handed to `onCreated`, real enough to attach and dispatch DOM events on
+// (`webglcontextlost`) — that is the one thing Phase 5's context-loss path needs from it.
+type MockGl = { domElement: HTMLCanvasElement; shadowMap: { enabled: boolean; type?: unknown } };
+let lastCreatedGl: MockGl | null = null;
+vi.mock('@react-three/fiber', () => ({
+  Canvas: ({
+    children,
+    frameloop,
+    shadows,
+    dpr,
+    gl,
+    onCreated,
+  }: {
+    children: React.ReactNode;
+    frameloop?: string;
+    shadows?: boolean;
+    dpr?: unknown;
+    gl?: unknown;
+    onCreated?: (state: { gl: MockGl }) => void;
+  }) => {
+    // Real R3F fires `onCreated` exactly once, the first time the GL context is created — a lazy
+    // `useState` initialiser is the cheapest way to reproduce that "once per mount" timing here.
+    const [createdGl] = useState<MockGl>(() => {
+      const fake: MockGl = { domElement: document.createElement('canvas'), shadowMap: { enabled: false } };
+      onCreated?.({ gl: fake });
+      return fake;
+    });
+    lastCreatedGl = createdGl;
+    return (
+      <div
+        data-testid="drone-canvas"
+        data-frameloop={frameloop}
+        data-shadows={String(Boolean(shadows))}
+        data-dpr={JSON.stringify(dpr)}
+        data-gl={JSON.stringify(gl)}
+      >
+        {children}
+      </div>
+    );
+  },
+  useFrame: () => undefined,
+  useThree: (selector?: (state: typeof threeState) => unknown) => (selector ? selector(threeState) : threeState),
+}));
+// Captures the `onFallback` handler `SceneCanvas` registers so tests can invoke it directly,
+// standing in for drei's real FPS sampling.
+const performanceMonitor: { onFallback?: (api: unknown) => void } = {};
+vi.mock('@react-three/drei', () => ({
+  useGLTF: Object.assign(vi.fn(() => ({ scene: { getObjectByName: () => undefined } })), { preload: () => undefined }),
+  PerformanceMonitor: ({
+    children,
+    onFallback,
+  }: {
+    children?: React.ReactNode;
+    onFallback?: (api: unknown) => void;
+  }) => {
+    performanceMonitor.onFallback = onFallback;
+    return <>{children}</>;
+  },
+  AdaptiveDpr: () => null,
+  AdaptiveEvents: () => null,
+}));
 
 afterEach(() => {
   vi.clearAllMocks();
-  motion.desktop = false;
+  motion.tier = 'none';
+  motion.capabilityTier = undefined;
   motion.paused = false;
-  motion.reduced = false;
-  motion.saveData = false;
+  performanceMonitor.onFallback = undefined;
+  lastCreatedGl = null;
 });
 
 describe('DroneScene', () => {
   it('loads the approved white drone asset on eligible devices', () => {
-    motion.desktop = true;
+    motion.tier = 'full';
     render(<DroneScene />);
     expect(useGLTF).toHaveBeenCalledWith('/media/drone/aele-white-drone.glb');
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'true');
   });
 
   it('renders nothing at all when motion is not eligible', () => {
@@ -51,11 +124,472 @@ describe('DroneScene', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
-  it('keeps the drone active when the hero motion control is paused', () => {
-    motion.desktop = true;
+  // Superseded by Phase 4 ("DroneScene — bounded (lite/hover) mode" below): lite is now a
+  // first-class bounded hover mode, not a placeholder that renders nothing. Inverted here, like
+  // the pause test above, so a future regression back to "lite renders nothing" fails a test
+  // instead of shipping silently.
+  it('mounts a bounded scene — not nothing — when tier is lite', () => {
+    motion.tier = 'lite';
+    const { container } = render(<DroneScene />);
+    expect(container).not.toBeEmptyDOMElement();
+    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
+  });
+
+  // WCAG 2.2.2 (Level A) requires that any moving, blinking or scrolling content the page starts
+  // automatically can be paused, stopped or hidden by the visitor. README.md ("Media behavior",
+  // ~line 30) documents that the pause control stops automatic hero/scroll/gimbal motion, so the
+  // drone must honour it too. This test used to be named 'keeps the drone active when the hero
+  // motion control is paused' and asserted the opposite — that the canvas stayed running while
+  // paused. That was the bug, fossilised as a test: do not invert this assertion again.
+  it('stops the drone when the visitor pauses motion', () => {
+    motion.tier = 'full';
     motion.paused = true;
     render(<DroneScene />);
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+  });
+
+  it('does not mount at all when the pause preference was already persisted before this mounted', () => {
+    // Distinguishes "paused before mount" from "paused mid-session": there is no running drone to
+    // preserve here, so paying for the GLB fetch and a WebGL context would only produce a frozen
+    // drone nobody asked to see.
+    motion.tier = 'full';
+    motion.paused = true;
+    const { container } = render(<DroneScene />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // Regression guard for the ref-based `startedPaused` bug: `getServerSnapshot()` in
+  // motion-context.tsx always reports the "no motion" policy (`reduced: true`, `preference:
+  // 'unset'`) on the render React uses for hydration, which resolves to `capabilityTier === 'none'`
+  // and `paused === false` — regardless of what is actually persisted in localStorage. The real,
+  // settled values (e.g. a persisted `aele:motion=off`) only arrive on a *later* render, once
+  // `useSyncExternalStore` re-syncs. A `useRef(paused).current` initialiser only ever reads the
+  // argument on the render that creates the ref (the lying one) — it can never see that later,
+  // truthful `paused`. This test reproduces exactly that ordering: mount with the "unset" lie, then
+  // let the settled ("already paused") values arrive on the next render.
+  it('never mounts when the paused-before-mount preference only becomes known after the lying first render settles', () => {
+    motion.capabilityTier = 'none';
+    motion.tier = 'none';
+    motion.paused = false;
+    const { container, rerender } = render(<DroneScene />);
+    expect(container).toBeEmptyDOMElement();
+
+    // The store resyncs post-mount: this device is actually capable, but the preference persisted
+    // from a previous visit was 'off'.
+    motion.capabilityTier = 'full';
+    motion.tier = 'full';
+    motion.paused = true;
+    rerender(<DroneScene />);
+
+    // There was never a moment this session should have started running the drone, so it must stay
+    // fully unmounted — not a frozen canvas that silently downloaded the GLB and spun up WebGL.
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+  });
+
+  it('freezes in place instead of unmounting when paused mid-session', () => {
+    motion.tier = 'full';
+    motion.paused = false;
+    const { rerender } = render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'always');
+
+    motion.paused = true;
+    rerender(<DroneScene />);
+    // The canvas is still in the DOM — pausing freezes it, it does not tear it down.
     expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'never');
+  });
+
+  it('resumes with frameloop="always" after being paused mid-session', () => {
+    motion.tier = 'full';
+    motion.paused = false;
+    const { rerender } = render(<DroneScene />);
+
+    motion.paused = true;
+    rerender(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'never');
+
+    motion.paused = false;
+    rerender(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'always');
+  });
+
+  // Freezing is only ever the answer to a deliberate pause. When the session itself stops being
+  // able to run the drone, the scene has to go away — keeping it alive would defeat the very
+  // preferences (reduced motion, save-data, small viewports) that gate it.
+  it('unmounts when the visitor turns on reduced motion mid-session', () => {
+    motion.tier = 'full';
+    const { rerender } = render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+
+    motion.tier = 'none';
+    motion.capabilityTier = 'none';
+    rerender(<DroneScene />);
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+  });
+
+  // Superseded by Phase 4: the viewport shrinking below the desktop breakpoint now switches the
+  // drone to bounded hover mode instead of unmounting it — lite stopped being a no-op tier.
+  // Regression guard: the `IntersectionObserver` effect used to run once with `deps: []`, on the
+  // render React uses for hydration — where `mountable` is always false (see the shared root
+  // cause) and the component returns `null`. `sceneRef.current` was therefore `null` the one and
+  // only time that effect ever ran, so it bailed out and never observed anything, for the rest of
+  // the component's life — `visible` stayed permanently stuck at its initial `true`.
+  it('attaches the IntersectionObserver once the scene actually mounts, even though the first render returned null', () => {
+    // `vi.unstubAllGlobals()` would also revert the module-load `IntersectionObserver`/
+    // `ResizeObserver` stubs from tests/setup.ts, breaking every later test in this file — restore
+    // the original stub by hand instead (same pattern as the `requestIdleCallback` tests below).
+    const originalIntersectionObserver = window.IntersectionObserver;
+    const observed: IntersectionObserverCallback[] = [];
+    class CapturingObserver {
+      callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+        observed.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', CapturingObserver);
+
+    // Not eligible yet: the first render (like the real hydration render) returns null.
+    motion.tier = 'none';
+    motion.capabilityTier = 'none';
+    const { rerender } = render(<DroneScene />);
+    expect(observed).toHaveLength(0);
+
+    // Now the real, settled capability arrives.
+    motion.tier = 'full';
+    motion.capabilityTier = 'full';
+    rerender(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(observed).toHaveLength(1);
+
+    act(() => {
+      observed[0]([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+    });
+    // `visible` actually responded to the observer instead of being clamped to its initial `true`.
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'never');
+
+    vi.stubGlobal('IntersectionObserver', originalIntersectionObserver);
+  });
+
+  it('switches to bounded hover mode instead of unmounting when the viewport shrinks below the desktop breakpoint', () => {
+    // Entering hover mode (re-)triggers the idle deferral (see `useDeferredCanvasMount`), so this
+    // transition needs the same synchronous-idle-callback stub the bounded-mode tests use.
+    const idleCallback = vi.fn((callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 0 });
+      return 1;
+    });
+    (window as unknown as { requestIdleCallback: typeof idleCallback }).requestIdleCallback = idleCallback;
+
+    motion.tier = 'full';
+    const { container, rerender } = render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(container.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
+
+    motion.tier = 'lite';
+    motion.capabilityTier = 'lite';
+    rerender(<DroneScene />);
+    // The mount point picks up `data-bounded` immediately, and the canvas re-mounts once the
+    // (stubbed, synchronous) idle deferral for the newly-entered hover mode resolves.
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
+
+    delete (window as unknown as { requestIdleCallback?: unknown }).requestIdleCallback;
+  });
+});
+
+// Phase 4: the lite tier now mounts a bounded, hover-mode drone instead of rendering nothing.
+// Mounting the canvas is deferred to idle so the hero poster's LCP is never blocked by the GLB
+// fetch, so every test that needs the canvas present makes `requestIdleCallback` run its callback
+// synchronously — the deferral itself is exercised by its own dedicated tests below.
+describe('DroneScene — bounded (lite/hover) mode', () => {
+  // `vi.stubGlobal`/`vi.unstubAllGlobals` would also revert the one-time `IntersectionObserver`/
+  // `ResizeObserver` stubs installed by tests/setup.ts at module load, breaking every later test
+  // in the file — so `requestIdleCallback` is patched onto `window` directly and removed by hand.
+  afterEach(() => {
+    delete (window as unknown as { requestIdleCallback?: unknown }).requestIdleCallback;
+  });
+
+  function stubSynchronousIdleCallback() {
+    const idleCallback = vi.fn((callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 0 });
+      return 1;
+    });
+    (window as unknown as { requestIdleCallback: typeof idleCallback }).requestIdleCallback = idleCallback;
+    return idleCallback;
+  }
+
+  it('marks the mount point as bounded to the hero in the lite tier', () => {
+    stubSynchronousIdleCallback();
+    motion.tier = 'lite';
+    const { container } = render(<DroneScene />);
+    expect(container.querySelector('.drone-scene')).toHaveAttribute('data-bounded', 'true');
+  });
+
+  it('does not bound the mount point in the full/flight tier', () => {
+    motion.tier = 'full';
+    const { container } = render(<DroneScene />);
+    expect(container.querySelector('.drone-scene')).not.toHaveAttribute('data-bounded');
+  });
+
+  it('never registers a pointermove listener in the lite tier', () => {
+    stubSynchronousIdleCallback();
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    expect(addEventListenerSpy.mock.calls.some(([type]) => (type as string) === 'pointermove')).toBe(false);
+  });
+
+  it('never queries the flight-stop selectors, the scroll listener, or a body ResizeObserver in the lite tier', () => {
+    stubSynchronousIdleCallback();
+    const querySelectorSpy = vi.spyOn(document, 'querySelector');
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+    const observeSpy = vi.spyOn(window.ResizeObserver.prototype, 'observe');
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    // The big saving this phase exists for: none of the 8 flight-stop selectors are ever asked
+    // for, so the 3 catalogue films (and the rest of the page) never get measured on mobile.
+    expect(querySelectorSpy).not.toHaveBeenCalledWith('.film-0');
+    expect(addEventListenerSpy.mock.calls.some(([type]) => (type as string) === 'scroll')).toBe(false);
+    expect(observeSpy.mock.calls.some(([target]) => target === document.body)).toBe(false);
+  });
+
+  it('configures a cheaper WebGL context in the lite tier', () => {
+    stubSynchronousIdleCallback();
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    const canvas = screen.getByTestId('drone-canvas');
+    expect(canvas).toHaveAttribute('data-dpr', JSON.stringify([0.75, 1]));
+    expect(canvas).toHaveAttribute(
+      'data-gl',
+      JSON.stringify({ alpha: true, antialias: false, powerPreference: 'default', stencil: false }),
+    );
+    expect(canvas).toHaveAttribute('data-shadows', 'false');
+  });
+
+  it('renders fewer lights in the lite tier than the full tier', () => {
+    stubSynchronousIdleCallback();
+    motion.tier = 'lite';
+    const { container: liteContainer } = render(<DroneScene />);
+    const liteLights = liteContainer.querySelectorAll('ambientlight, hemispherelight, directionallight, pointlight').length;
+
+    motion.tier = 'full';
+    const { container: fullContainer } = render(<DroneScene />);
+    const fullLights = fullContainer.querySelectorAll('ambientlight, hemispherelight, directionallight, pointlight').length;
+
+    expect(liteLights).toBe(2);
+    expect(liteLights).toBeLessThan(fullLights);
+  });
+
+  // `getServerSnapshot()` in motion-context.tsx always reports 'flight' on the hydration render
+  // (see the comment there), so `useDeferredCanvasMount`'s state can never be seeded from that
+  // first render's `mode` — it has to be derived in an effect once `mode` actually settles to
+  // 'hover'. A `useState(mode !== 'hover')` initialiser reads that lying first render and never
+  // reruns, permanently skipping the whole readyState/idle deferral in production.
+  it('still defers the idle path when hover mode only settles after the first render (regression: lazy useState initializer reads the always-flight hydration snapshot)', () => {
+    const idleCallback = stubSynchronousIdleCallback();
+    Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
+
+    function Wrapper() {
+      const [, forceRerender] = useState(0);
+      return (
+        <>
+          <button
+            onClick={() => {
+              // Mutated in an event handler, not during render, so this stands in for the mock's
+              // underlying value actually changing (e.g. the real store settling post-hydration)
+              // rather than a prop flowing down through render.
+              motion.tier = 'lite';
+              motion.capabilityTier = 'lite';
+              forceRerender((count) => count + 1);
+            }}
+          >
+            go lite
+          </button>
+          <DroneScene />
+        </>
+      );
+    }
+
+    motion.tier = 'full';
+    motion.capabilityTier = 'full';
+    render(<Wrapper />);
+    // Starts in 'full'/flight — no deferral, mounts immediately.
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+
+    act(() => {
+      screen.getByRole('button', { name: 'go lite' }).click();
+    });
+
+    // Switching to hover mid-session must still defer via requestIdleCallback — it must not have
+    // been permanently skipped by a stale `ready === true` from the first render.
+    expect(idleCallback).toHaveBeenCalled();
+  });
+
+  it('defers mounting the canvas until the document has finished loading and gone idle', () => {
+    const originalReadyState = Object.getOwnPropertyDescriptor(Document.prototype, 'readyState');
+    Object.defineProperty(document, 'readyState', { value: 'loading', configurable: true });
+    const idleCallback = stubSynchronousIdleCallback();
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+    expect(idleCallback).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
+    act(() => {
+      window.dispatchEvent(new Event('load'));
+    });
+    expect(idleCallback).toHaveBeenCalled();
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+
+    if (originalReadyState) Object.defineProperty(Document.prototype, 'readyState', originalReadyState);
+  });
+
+  it('falls back to a 200ms timeout when requestIdleCallback is unavailable', () => {
+    vi.useFakeTimers();
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+});
+
+// Phase 5: `useDetectGPU`-style device lookups were rejected (see the plan) in favour of actually
+// measuring the running session — drei's `PerformanceMonitor` samples real frame times, and a
+// lost WebGL context is treated the same way. Either path unmounts the scene entirely (not just
+// dropping to a cheaper tier) and remembers the verdict so the next visit does not pay for the
+// GLB fetch and a WebGL context just to fail again.
+describe('DroneScene — measured performance degradation', () => {
+  const DRONE_TIER_KEY = 'aele:drone-tier';
+  const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('unmounts and persists a low verdict when the performance monitor falls back after warm-up', () => {
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+    const stored = JSON.parse(window.localStorage.getItem(DRONE_TIER_KEY) ?? 'null');
+    expect(stored).toMatchObject({ v: 1, verdict: 'low' });
+    expect(typeof stored.at).toBe('number');
+  });
+
+  it('ignores a fallback fired before the warm-up grace period elapses', () => {
+    // The GLB parse and shader compile sink the first second of FPS on every device — without a
+    // grace period, `onFallback` would fire (and degrade) on hardware that is actually fine.
+    motion.tier = 'full';
+    render(<DroneScene />);
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(window.localStorage.getItem(DRONE_TIER_KEY)).toBeNull();
+  });
+
+  it('never mounts when a low verdict was already persisted', () => {
+    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 1, verdict: 'low', at: Date.now() }));
+    motion.tier = 'full';
+    const { container } = render(<DroneScene />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('ignores an expired low verdict', () => {
+    window.localStorage.setItem(
+      DRONE_TIER_KEY,
+      JSON.stringify({ v: 1, verdict: 'low', at: Date.now() - THIRTY_ONE_DAYS_MS }),
+    );
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+  });
+
+  it('ignores a low verdict stored under an older scene cost version', () => {
+    // `v` is bumped whenever the scene itself gets more expensive to render (new geometry,
+    // shadows, materials) — an old verdict measured against a cheaper scene should not survive.
+    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 0, verdict: 'low', at: Date.now() }));
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+  });
+
+  // A lost WebGL context is not a performance signal: a driver reset/update, the browser evicting
+  // a context under GPU/tab pressure, or a laptop waking from sleep can all fire it on a perfectly
+  // capable desktop. Only `PerformanceMonitor`'s own verdict (see the test above) reflects this
+  // device's actual, measured performance and is worth remembering for 30 days — a context loss
+  // degrades only the current session.
+  it('degrades the current session but does NOT persist a verdict when the WebGL context is lost after warm-up', () => {
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(lastCreatedGl).not.toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    act(() => {
+      lastCreatedGl!.domElement.dispatchEvent(new Event('webglcontextlost'));
+    });
+
+    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(DRONE_TIER_KEY)).toBeNull();
+  });
+
+  // `warmedUp` used to be armed once, in a `useEffect` with `deps: []`, at `SceneCanvas`'s first
+  // mount only. `frameloop` (the `active` prop) toggles between 'never' and 'always' every time the
+  // visitor pauses/resumes or the tab loses/regains focus, without unmounting `SceneCanvas` — so a
+  // one-time warm-up left every resume exposed to exactly the cold-start FPS dip the grace period
+  // exists to ignore.
+  it('re-arms the warm-up grace period every time frameloop resumes to always', () => {
+    motion.tier = 'full';
+    motion.paused = false;
+    const { rerender } = render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'always');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    motion.paused = true;
+    rerender(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'never');
+
+    motion.paused = false;
+    rerender(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-frameloop', 'always');
+
+    // Immediately after resuming — still inside the freshly re-armed warm-up window.
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(window.localStorage.getItem(DRONE_TIER_KEY)).toBeNull();
   });
 });
 
@@ -501,5 +1035,151 @@ describe('pointerLook', () => {
     expect(spread(0.5)).toBeLessThan(spread(0));
     expect(spread(0.5)).toBeGreaterThan(0);
     expect(spread(1)).toBe(0);
+  });
+});
+
+// Phase 3: hover mode has no scroll to derive motion from, so `hoverPose`/`hoverLook` are driven
+// purely by wall-clock time instead of `progress`/`landing`.
+describe('hoverPose', () => {
+  const base = { x: 0.5, y: 0.2, width: 0.22, rotationX: 0.05, rotationY: 0, rotationZ: 0 };
+
+  it('sits exactly on the base pose at time zero', () => {
+    expect(hoverPose(base, 0)).toEqual(base);
+  });
+
+  it('stays bounded around the base pose forever', () => {
+    for (let time = 0; time < 200; time += 1.7) {
+      const pose = hoverPose(base, time);
+      expect(Math.abs(pose.x - base.x)).toBeLessThan(0.05);
+      expect(Math.abs(pose.y - base.y)).toBeLessThan(0.05);
+      expect(Math.abs(pose.rotationZ - base.rotationZ)).toBeLessThan(0.05);
+    }
+  });
+
+  it('changes continuously — a small step in time is a small step in pose', () => {
+    let previous = hoverPose(base, 0);
+    for (let time = 0.016; time < 20; time += 0.016) {
+      const next = hoverPose(base, time);
+      expect(Math.abs(next.x - previous.x)).toBeLessThan(0.01);
+      expect(Math.abs(next.y - previous.y)).toBeLessThan(0.01);
+      previous = next;
+    }
+  });
+
+  it('repeats on a fixed period', () => {
+    const period = 6; // seconds — must match the internal HOVER_PERIOD.
+    for (const time of [0, 0.4, 1.9, 3.3, 5.1]) {
+      const a = hoverPose(base, time);
+      const b = hoverPose(base, time + period);
+      expect(a.x).toBeCloseTo(b.x);
+      expect(a.y).toBeCloseTo(b.y);
+      expect(a.rotationZ).toBeCloseTo(b.rotationZ);
+    }
+  });
+
+  it('leaves fields it does not animate untouched', () => {
+    const pose = hoverPose(base, 3.14);
+    expect(pose.width).toBe(base.width);
+    expect(pose.rotationX).toBe(base.rotationX);
+  });
+});
+
+describe('hoverLook', () => {
+  it('is bounded regardless of how much time has passed', () => {
+    for (let time = 0; time < 500; time += 3.3) {
+      const look = hoverLook(time);
+      expect(Math.abs(look.yaw)).toBeLessThan(0.3);
+      expect(Math.abs(look.pitch)).toBeLessThan(0.3);
+    }
+  });
+
+  it('depends only on time — the same instant always looks the same way', () => {
+    expect(hoverLook(4.2)).toEqual(hoverLook(4.2));
+  });
+
+  it('is not the zero-motion vector — the gimbal actually scans while hovering', () => {
+    const looks = [0, 1, 2, 3, 4, 5].map(hoverLook);
+    expect(looks.some((look) => Math.abs(look.yaw) > 0.01 || Math.abs(look.pitch) > 0.01)).toBe(true);
+  });
+});
+
+describe('HOVER_ROTOR_SPEED', () => {
+  it('is a real positive idle speed, not the flight function evaluated at rest', () => {
+    // `rotorTargetSpeed(0, 0)` is 0 by design — flight rotors only spin once the page scrolls.
+    // Hover has no scroll at all, so reusing that function would freeze the rotors on a drone
+    // that is otherwise visibly bobbing and drifting, which reads as broken, not parked.
+    expect(rotorTargetSpeed(0, 0)).toBe(0);
+    expect(HOVER_ROTOR_SPEED).toBeGreaterThan(0);
+  });
+
+  it('actually moves the rotors forward when stepped as the hover target', () => {
+    const frame = 0.016;
+    let speed = 0;
+    for (let i = 0; i < 60; i += 1) speed = stepRotorSpeed(speed, HOVER_ROTOR_SPEED, frame);
+    expect(speed).toBeGreaterThan(0);
+  });
+});
+
+describe('heroBandPose', () => {
+  it('keeps the drone within the open band above the copy, not inside it', () => {
+    const band = { top: 0, bottom: 180 };
+    const heroHeight = 760;
+    const pose = heroBandPose(band, heroHeight);
+    expect(pose.y).toBeGreaterThanOrEqual(band.top / heroHeight);
+    expect(pose.y).toBeLessThanOrEqual(band.bottom / heroHeight);
+  });
+
+  it('sizes the drone to fit inside a narrower band', () => {
+    const wide = heroBandPose({ top: 0, bottom: 400 }, 760);
+    const narrow = heroBandPose({ top: 0, bottom: 150 }, 760);
+    expect(narrow.width).toBeLessThanOrEqual(wide.width);
+  });
+
+  it('degrades to a finite, sane pose when the band is too small to be worth flying in', () => {
+    const pose = heroBandPose({ top: 40, bottom: 55 }, 760);
+    expect(Number.isFinite(pose.x)).toBe(true);
+    expect(Number.isFinite(pose.y)).toBe(true);
+    expect(pose.width).toBeGreaterThan(0);
+  });
+
+  it('degrades to a finite, sane pose when the hero could not be measured', () => {
+    const pose = heroBandPose({ top: 0, bottom: 400 }, 0);
+    expect(Number.isFinite(pose.x)).toBe(true);
+    expect(Number.isFinite(pose.y)).toBe(true);
+    expect(pose.width).toBeGreaterThan(0);
+  });
+});
+
+// Regression: `.hero-topline` paints with no `z-index` (see the CSS comment on `.drone-scene`), so
+// it renders BELOW the drone (`z-index:2`). The open band the hovering drone flies in used to start
+// at the hero's own top edge (`top: 0`), which on a real mobile layout (`.site-header` ~90px,
+// `.hero-topline` at `top:118px`) sits the drone directly on top of the topline text.
+describe('heroBandTop', () => {
+  it('starts the band below the topline, not at the hero edge', () => {
+    // A realistic mobile measurement: hero starts at viewport y=90 (below the fixed header), the
+    // topline sits at hero-relative top:118px and is ~20px tall, so its bottom edge is at
+    // viewport y = 90 + 118 + 20 = 228.
+    const heroTop = 90;
+    const toplineBottom = 228;
+    expect(heroBandTop(toplineBottom, heroTop)).toBeCloseTo(138); // 228 - 90
+    expect(heroBandTop(toplineBottom, heroTop)).toBeGreaterThan(0);
+  });
+
+  it('degrades to the hero edge when the topline could not be measured', () => {
+    expect(heroBandTop(null, 90)).toBe(0);
+  });
+
+  it('never goes negative even if the topline measured above the hero top', () => {
+    expect(heroBandTop(50, 90)).toBe(0);
+  });
+});
+
+describe('heroBandPose — kept clear of the topline', () => {
+  it('keeps the drone below the topline once the band starts under it', () => {
+    const heroHeight = 730;
+    const toplineBottom = heroBandTop(228, 90); // see heroBandTop tests above
+    const band = { top: toplineBottom, bottom: 300 };
+    const pose = heroBandPose(band, heroHeight);
+    expect(pose.y).toBeGreaterThanOrEqual(band.top / heroHeight);
   });
 });

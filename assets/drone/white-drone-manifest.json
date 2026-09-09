@@ -25,9 +25,9 @@
     ]
   },
   "width": 3.957052707672119,
-  "triangles": 40080,
-  "mesh_count": 94,
-  "glb_bytes": 863248,
+  "triangles": 42788,
+  "mesh_count": 105,
+  "glb_bytes": 931132,
   "gltf_axes": {
     "up": "+Y",
     "front": "+Z",
@@ -39,8 +39,9 @@
     "Brushed motor aluminum",
     "Pearl white polymer",
     "Coated optical glass",
-    "Graphite propeller polymer",
-    "Black elastomer"
+    "Black elastomer",
+    "Panel seam shadow",
+    "Graphite propeller polymer"
   ],
   "validation": "Reimported GLB, measured world geometry; standalone validator checks JSON hierarchy.",
   "blender_local_pivots": {

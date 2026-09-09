@@ -27,6 +27,17 @@ describe('white drone asset contract', () => {
       const color = material.pbrMetallicRoughness?.baseColorFactor;
       return color && color.slice(0, 3).every((channel) => channel > 0.7);
     })).toBe(true);
+    // These details are intentional: they break up the toy-like uninterrupted white shell and
+    // make the front optics read as technical equipment rather than a pair of cartoon eyes.
+    for (const name of [
+      'Top hatch perimeter seam',
+      'Forward stereo sensor fascia',
+      'Forward rangefinder window',
+      'Motor cooling collar FL',
+      'Gimbal side fairing L',
+    ]) {
+      expect(indexOf(name), name).toBeGreaterThanOrEqual(0);
+    }
     expect(file.equals(readFileSync(resolve('assets/drone/aele-white-drone.glb')))).toBe(true);
     expect(readFileSync(resolve('public/media/drone/aele-graphite-drone.glb')).length).toBeGreaterThan(0);
   });
