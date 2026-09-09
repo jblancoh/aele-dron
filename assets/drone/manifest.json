@@ -1,0 +1,29 @@
+{
+  "name": "AELE Graphite Drone",
+  "original_design": true,
+  "format": "glTF 2.0 binary",
+  "units": "meters",
+  "blender_forward": "-Y",
+  "blender_up": "+Z",
+  "gltf_forward": "+Z",
+  "gltf_up": "+Y",
+  "pivots": [
+    "DroneRoot",
+    "Rotor_FL",
+    "Rotor_FR",
+    "Rotor_RL",
+    "Rotor_RR",
+    "GimbalYaw",
+    "GimbalPitch"
+  ],
+  "rotor_spin_axis_gltf": "local Y",
+  "gimbal_yaw_axis_gltf": "local Y",
+  "gimbal_pitch_axis_gltf": "local X",
+  "mesh_count": 130,
+  "triangles": 43668,
+  "glb_bytes": 1009744,
+  "validation": "GLB reimport passed; required pivots and gimbal hierarchy verified",
+  "animations": "No baked clips. Rotate named pivots and DroneRoot at runtime.",
+  "studio": "Included in .blend only; excluded from GLB.",
+  "generator": "scripts/drone/generate_drone.py"
+}

@@ -4,11 +4,13 @@ import {Catalog} from '@/components/catalog';
 import {Contact} from '@/components/contact';
 import {HeroVideo} from '@/components/hero-video';
 import {MotionProvider} from '@/components/motion-context';
+import {DroneScene} from '@/components/drone-scene';
 import {ScrollStory} from '@/components/scroll-story';
 import {site,portfolio} from '@/lib/site-content';
 
 export default function Home(){
  return <MotionProvider><a className="skip-link" href="#catalogo">Saltar al catálogo</a><main id="inicio">
+  <DroneScene/>
   <header className="site-header"><a className="brand" href="#inicio" aria-label="AELE, inicio"><img src="/media/aele-logo.jpg" width="104" height="104" alt="aele·dron"/></a><nav aria-label="Navegación principal"><a href="#catalogo">Catálogo</a><a href="#nosotros">Lo que hacemos</a></nav><a className="header-contact" href="#contacto">Hablemos <ArrowUpRight size={17}/></a></header>
   <section className="hero" aria-labelledby="hero-title"><HeroVideo/><div className="hero-shade"/><div className="hero-topline"><span><i/> VIDEOGRAFÍA AÉREA</span><span>VILLAHERMOSA, TABASCO · MÉXICO</span></div>
    <div className="hero-copy"><p className="eyebrow">HAY MOMENTOS QUE MERECEN MÁS.</p><h1 id="hero-title">Tu evento,<br/>desde otra<br/><span>perspectiva.</span></h1><div className="hero-actions"><a className="pill pill-white" href="#catalogo"><Play size={15} fill="currentColor"/> Explorar el catálogo</a><a className="text-link" href="#contacto">Hagamos algo increíble <ArrowUpRight size={17}/></a></div></div>
