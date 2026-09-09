@@ -5,15 +5,18 @@ import { Pause,Play } from 'lucide-react';
 import { useMotion } from './motion-context';
 export function HeroVideo(){
  const ref=useRef<HTMLVideoElement>(null);
- const {paused,reduced,desktop,saveData,tier,toggle}=useMotion();
+ const {paused,reduced,saveData,networkOk,tier,toggle}=useMotion();
 
  const [failed,setFailed]=useState(false);
  const [blocked,setBlocked]=useState(false);
  const [manuallyStarted,setManuallyStarted]=useState(false);
- const allowVideo=!reduced&&desktop&&!saveData;
+ // Autoplays on desktop AND mobile now — the real cost of `coast.mp4` is its 2.4MB download, not
+ // decode CPU (hardware-accelerated on any phone), so the gate is network quality (`networkOk`),
+ // not viewport width. See `motion-context.tsx`'s `SLOW_NETWORK_TYPES` for the exact thresholds.
+ const allowVideo=!reduced&&!saveData&&networkOk;
  const enabled=allowVideo||manuallyStarted;
- // WCAG 2.2.2: any tier that can animate something (today the hero video on desktop, and once the
- // drone ships in later phases the lite-tier drone too) must expose a way to stop it. Once the
+ // WCAG 2.2.2: any tier that can animate something (the hero video on any device with a good
+ // connection, and the lite-tier drone) must expose a way to stop it. Once the
  // visitor has paused, the control must stay reachable regardless of tier so resuming is possible.
  // `tier` alone misses one case: a reduced-motion visitor who manually starts the fallback video.
  // Their tier stays 'none' (starting the video must not wake the global preference and, with it,

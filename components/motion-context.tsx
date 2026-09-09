@@ -1,8 +1,25 @@
 'use client';
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react';
 
-type Connection = { saveData?: boolean; addEventListener?: (event: string, callback: () => void) => void; removeEventListener?: (event: string, callback: () => void) => void };
+type Connection = {
+  saveData?: boolean;
+  effectiveType?: string;
+  addEventListener?: (event: string, callback: () => void) => void;
+  removeEventListener?: (event: string, callback: () => void) => void;
+};
 function connection() { return (navigator as Navigator & { connection?: Connection }).connection; }
+
+/**
+ * `effectiveType` values slow enough that autoplaying the hero's 2.4MB `coast.mp4` would compete
+ * with the rest of the page for bandwidth. Device/GPU capability is a different signal entirely
+ * (see `aele:drone-tier` in drone-scene.tsx, which measures rendering, not network) — video decode
+ * is hardware-accelerated on any phone, so the video's own gate is network quality alone.
+ */
+const SLOW_NETWORK_TYPES = new Set(['slow-2g', '2g', '3g']);
+function isSlowNetwork() {
+  const type = connection()?.effectiveType;
+  return !!type && SLOW_NETWORK_TYPES.has(type);
+}
 
 /** Single source of truth for the desktop breakpoint — CSS must never redeclare it. */
 export const DESKTOP_QUERY = '(min-width: 701px)';
@@ -13,6 +30,7 @@ export type MotionTier = 'full' | 'lite' | 'none';
 
 const PREFERENCE_ON_BIT = 8;
 const PREFERENCE_OFF_BIT = 16;
+const SLOW_NETWORK_BIT = 32;
 
 // Cached so repeated snapshot() calls don't hit localStorage on every render. Invalidated by
 // writePreference() (this tab) and by the 'storage' event (another tab).
@@ -78,7 +96,8 @@ function snapshot() {
     (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0) |
     (window.matchMedia(DESKTOP_QUERY).matches ? 2 : 0) |
     (connection()?.saveData ? 4 : 0) |
-    preferenceBits(readPreference())
+    preferenceBits(readPreference()) |
+    (isSlowNetwork() ? SLOW_NETWORK_BIT : 0)
   );
 }
 
@@ -103,6 +122,14 @@ type MotionContextValue = {
   reduced: boolean;
   desktop: boolean;
   saveData: boolean;
+  /**
+   * Whether the network is fast enough to autoplay the hero's background video — see
+   * `SLOW_NETWORK_TYPES`. Independent of `tier`/`capabilityTier`: those gate the WebGL drone on
+   * device/viewport/reduced-motion/Save-Data, none of which is what the video's 2.4MB download
+   * actually costs. `true` when `navigator.connection` (and therefore `effectiveType`) does not
+   * exist at all — Safari never implements it, and an unknown network must not be treated as slow.
+   */
+  networkOk: boolean;
   preference: MotionPreference;
   tier: MotionTier;
   capabilityTier: MotionTier;
@@ -115,6 +142,7 @@ const MotionContext = createContext<MotionContextValue>({
   reduced: true,
   desktop: false,
   saveData: false,
+  networkOk: true,
   preference: 'unset',
   tier: 'none',
   capabilityTier: 'none',
@@ -127,6 +155,7 @@ export function MotionProvider({ children }: { children: React.ReactNode }) {
   const reduced = !!(policy & 1);
   const desktop = !!(policy & 2);
   const saveData = !!(policy & 4);
+  const networkOk = !(policy & SLOW_NETWORK_BIT);
   const preference: MotionPreference = policy & PREFERENCE_ON_BIT ? 'on' : policy & PREFERENCE_OFF_BIT ? 'off' : 'unset';
   const tier = resolveTier({ reduced, desktop, saveData, preference });
   // What this session could run if motion were switched on. A paused visitor can be resumed; a
@@ -136,7 +165,7 @@ export function MotionProvider({ children }: { children: React.ReactNode }) {
   const setPreference = useCallback((value: MotionPreference) => writePreference(value), []);
   const toggle = useCallback(() => writePreference(preference === 'off' ? 'on' : 'off'), [preference]);
   return (
-    <MotionContext.Provider value={{ paused: preference === 'off', reduced, desktop, saveData, preference, tier, capabilityTier, toggle, setPreference }}>
+    <MotionContext.Provider value={{ paused: preference === 'off', reduced, desktop, saveData, networkOk, preference, tier, capabilityTier, toggle, setPreference }}>
       {children}
     </MotionContext.Provider>
   );
