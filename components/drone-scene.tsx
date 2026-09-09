@@ -103,6 +103,17 @@ export type FlightStop = {
    * section is already scrolling away.
    */
   align?: number;
+  /**
+   * Fixed pixel offset from the anchor element's own top edge, used instead of `clearBelow` when
+   * the parking spot is a structural gap (fixed CSS padding) rather than a measured child's
+   * bottom edge. Negative values park the drone ABOVE the anchor's top edge. See
+   * `MOBILE_FLIGHT_STOPS`' final stop: anchoring to `.footer-top` with a negative offset lands the
+   * drone in the ~100px strip between `.contact-section`'s own padding-bottom and `.footer-top`'s
+   * padding-top — a gap whose size never changes no matter how tall the multi-step form panel
+   * above it renders, unlike measuring the panel itself (see that stop's comment for the bug this
+   * replaced). Mutually exclusive with `clearBelow` — do not set both on the same stop.
+   */
+  clearOffset?: number;
 };
 
 /** Parked beside the contact form: low on the left, small, turned to watch the panel. */
@@ -145,17 +156,32 @@ export const FLIGHT_STOPS: FlightStop[] = [
  * between the end of `.contact-section` (`padding-bottom:80px`) and `.footer-top`
  * (`padding-top:20px`) — the mobile analogue of `LANDING_POSE`, sized down for a narrower
  * viewport. `y` here is only the pre-measurement fallback (see `flightPose`); the real vertical
- * position is resolved live from `.contact-form-panel`'s bottom edge via `clearBelow`, same as
- * desktop.
+ * position is resolved live from `.footer-top`'s own top edge via `clearOffset` (a fixed,
+ * negative pixel offset — see `MOBILE_FLIGHT_STOPS`' final stop), not from the form panel.
+ * `x` is centred (`0.5`), unlike desktop's `LANDING_POSE.x` (`0.26`): desktop has an empty column
+ * beside the form to sit in, but the single-column mobile layout has none, so off-centre here just
+ * pinned the drone toward one edge for no reason (the bug report this fixed).
  */
 export const MOBILE_LANDING_POSE: DronePose = {
-  x: 0.14,
-  y: 0.86,
-  width: 0.18,
+  x: 0.5,
+  y: 0.9,
+  width: 0.14,
   rotationX: 0.06,
   rotationY: 0.32,
   rotationZ: 0.02,
 };
+
+/**
+ * Distance, in pixels and negative, from `.footer-top`'s own top edge up to the mobile landing's
+ * clear line. Derived from two fixed CSS facts, not from anything the form panel renders:
+ * `.contact-section{padding-bottom:80px}` and `.footer-top{padding:20px 0 32px}` together make a
+ * ~100px strip (from -80 to +20 relative to the footer's top) that exists no matter how tall the
+ * panel above it grows. `-65` keeps the drone's rendered top edge inside that strip's upper bound
+ * (`> -80`, using `DRONE_TOP_RATIO`) and its rendered bottom edge inside the lower one (`< 20`, at
+ * `MOBILE_LANDING_POSE.width` and the tallest phone viewport height these poses are meant for —
+ * see the "parking the mobile drone" tests for the exact margins across a realistic height range).
+ */
+const MOBILE_LANDING_CLEAR_OFFSET_PX = -65;
 
 /**
  * Mobile's own flight stops. The compacted mobile layout leaves almost no open ground: the
@@ -183,11 +209,29 @@ export const MOBILE_FLIGHT_STOPS: FlightStop[] = [
   // left margin — crossing right-to-left gives the pass its own direction instead of repeating the
   // catalogue's right-hand lane.
   { selector: '#nosotros', pose: { x: 0.1, y: 0.55, width: 0.14, rotationX: 0.04, rotationY: 0.3, rotationZ: 0.03 } },
-  // Desktop clears `.contact-intro p:last-of-type`, but on the stacked mobile layout the form
-  // panel sits below that paragraph, not open air — clearing the panel itself is what actually
-  // lands the drone in the one open strip left in this section: between `.contact-form-panel` and
-  // `.footer-top`.
-  { selector: '#contacto', align: 0.3, clearBelow: '.contact-form-panel', pose: MOBILE_LANDING_POSE },
+  // Desktop clears `.contact-intro p:last-of-type`, and an earlier version of this stop cleared
+  // `.contact-form-panel` the same way on mobile — but the stacked single-column layout puts the
+  // panel BELOW the intro, and on a short phone (390x844) the panel's own content bottom already
+  // sits ~843px down the section (padding-top 75 + intro ~260 + gap 18 + panel min-height 490):
+  // almost a full screen taller than the viewport itself. "Below the panel" was therefore
+  // routinely off the bottom of the screen, only scrolling into view once the reader had reached
+  // the footer — exactly the bug report this replaced. Anchoring to `.footer-top` instead fixes it
+  // categorically: `MOBILE_LANDING_CLEAR_OFFSET_PX` is a small NEGATIVE pixel offset from the
+  // footer's own top edge, landing the drone in the ~100px strip between the end of
+  // `.contact-section` (padding-bottom) and `.footer-top` (padding-top) — a strip whose size is
+  // fixed CSS, not measured from the panel, so it can never be taller than the viewport no matter
+  // how many steps the form's content grows through.
+  //
+  // `align` is deliberately much earlier than desktop's `0.28` for the same reason `flightPose`'s
+  // final approach is a document-space blend FROM `#nosotros`' own pose (see its doc comment): that
+  // blend's speed only stays non-negative (i.e. never climbs back up-screen) while the parked
+  // target is moving away from the current scroll position at least as fast as the reader scrolls.
+  // Solving that for this stop's own numbers (`#nosotros`' pose.y, `MOBILE_LANDING_CLEAR_OFFSET_PX`,
+  // `DRONE_TOP_RATIO`) shows the required `align` is independent of the actual on-page distance
+  // between the two sections, but does depend on viewport height — `0.65` clears the requirement
+  // even at the shortest phone heights this flies on (see "flying from services into the footer on
+  // mobile" in the test file for the margin check).
+  { selector: '.footer-top', align: 0.65, clearOffset: MOBILE_LANDING_CLEAR_OFFSET_PX, pose: MOBILE_LANDING_POSE },
 ];
 
 /** Gimbal aim held once parked, on top of the body rotation, so the camera stays on the form. */
@@ -449,7 +493,13 @@ function DroneModel({ pointer, profile }: { pointer: PointerRef; profile: DroneP
       const rect = element.getBoundingClientRect();
       anchorDocTop.current = rect.top + window.scrollY;
       const copy = parked.clearBelow ? element.querySelector(parked.clearBelow) : null;
-      clearBelow.current = copy ? copy.getBoundingClientRect().bottom - rect.top + PARK_GAP : 0;
+      // Two mutually exclusive ways to land: `clearBelow` measures a child's bottom edge live
+      // (desktop's landing, clearing the intro copy); `clearOffset` is a fixed pixel offset from
+      // the anchor's own top edge for a structural gap that no child measurement could express
+      // more robustly — see `MOBILE_FLIGHT_STOPS`' final stop and its `clearOffset` doc comment.
+      clearBelow.current = copy
+        ? copy.getBoundingClientRect().bottom - rect.top + PARK_GAP
+        : (parked.clearOffset ?? 0);
     };
     const onScroll = () => {
       // Lazy-loaded posters keep changing the page height as the reader travels down it, which

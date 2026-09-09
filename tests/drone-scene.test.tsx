@@ -1088,44 +1088,184 @@ describe('MOBILE_FLIGHT_STOPS', () => {
     }
   });
 
-  // Desktop's landing clears `.contact-intro p:last-of-type`, but on the stacked mobile layout the
-  // form panel sits below that paragraph, not open air — see the comment on the `#contacto` stop.
-  it('parks below the contact form panel, not the intro paragraph', () => {
-    const contact = MOBILE_FLIGHT_STOPS.find((stop) => stop.selector === '#contacto');
-    expect(contact?.clearBelow).toBe('.contact-form-panel');
+  // Bug report: the drone landed off the bottom of the screen and only reappeared once the reader
+  // had scrolled almost to the footer. Root cause — `.contact-form-panel`'s content bottom, on a
+  // 390x844 phone, sits ~843px below the section's own top (padding-top 75 + intro ~260 + gap 18 +
+  // panel min-height 490), so "below the panel" alone already exceeds the viewport height before
+  // any margin is even added. Anchoring to `.footer-top` instead fixes this categorically: the
+  // ~100px strip between the end of `.contact-section` (padding-bottom:80px) and `.footer-top`
+  // (padding-top:20px) is fixed CSS, not measured from the panel, so it neither depends on nor is
+  // ever exceeded by the panel's actual rendered height — see the "unaffected by panel height"
+  // describe block below for the direct proof of that.
+  it('parks just above the footer, not below the form panel', () => {
+    const contact = MOBILE_FLIGHT_STOPS.find((stop) => stop.selector === '.footer-top');
+    expect(contact).toBeDefined();
+    expect(contact?.clearBelow).toBeUndefined();
+    // Negative: the clear line sits ABOVE the footer's own top edge, inside the section's trailing
+    // padding, not below it.
+    expect(contact?.clearOffset).toBeLessThan(0);
     expect(contact?.pose).toBe(MOBILE_LANDING_POSE);
-    expect(contact?.align).toBeGreaterThan(0.2);
-    expect(contact?.align).toBeLessThan(0.4);
+    // Much earlier than desktop's `0.28` for `#contacto` — see this stop's own comment in
+    // `drone-scene.tsx` for why the document-space approach blend needs that much more runway here.
+    expect(contact?.align).toBeGreaterThan(0.5);
+    expect(contact?.align).toBeLessThan(0.8);
+  });
+
+  // The centred `x` is the other half of the same bug report: `0.14` was copied from desktop's
+  // `LANDING_POSE`, where an empty left column exists beside the form. The stacked single-column
+  // mobile layout has no such column, so `0.14` just pinned the drone off-centre for no reason.
+  it('centres the mobile landing horizontally, unlike the desktop pose it was copied from', () => {
+    expect(MOBILE_LANDING_POSE.x).toBeCloseTo(0.5);
   });
 });
 
 // `parkedPoseY`/`flightPose` are the same pure functions desktop's landing already relies on (see
-// "parking the drone on the page" above) — reused here with the mobile landing's own width to
-// confirm they still hold below an arbitrary panel bottom, without hardcoding a device measurement
-// nobody has taken from a mobile browser yet (see the report to the requester for that gap).
-describe('parking the mobile drone below the form panel', () => {
+// "parking the drone on the page" above). Reused here to prove the mobile landing's own invariant:
+// the drone's rendered silhouette stays inside the fixed ~100px strip between the end of
+// `.contact-section` and the start of `.footer-top`'s visible content, at every plausible phone
+// viewport height — regardless of how tall the multi-step contact form happens to be at the time.
+describe('parking the mobile drone in the fixed strip above the footer', () => {
   const parked = MOBILE_FLIGHT_STOPS[MOBILE_FLIGHT_STOPS.length - 1];
   const WIDTH = parked.pose.width;
-  // `.contact-form-panel{min-height:490px}` is the real mobile CSS rule (see app/globals.css); the
-  // 40px is `PARK_GAP`, the same breathing room desktop's landing adds below its own clear line.
-  const CLEAR = 490 + 40;
-  const topEdge = (y: number, width: number) => y - 0.37 * width;
+  const CLEAR_OFFSET = parked.clearOffset!;
+  // Mirrors `DRONE_TOP_RATIO` (top edge, above pose.y) and the desktop landing tests' own
+  // `0.162` (bottom edge, below pose.y) — both are the same drone model, so the same silhouette
+  // ratios apply regardless of which pose list is flying it.
+  const TOP_RATIO = 0.37;
+  const BOTTOM_RATIO = 0.162;
+  const topEdge = (y: number, width: number) => y - TOP_RATIO * width;
+  const bottomEdge = (y: number, width: number) => y + BOTTOM_RATIO * width;
+  // `.contact-section{padding-bottom:80px}` — background still belongs to the section, but past
+  // this point there is no more content, panel included, whatever height it rendered at.
+  const SECTION_PADDING_BOTTOM = 80;
+  // `.footer-top{padding:20px 0 32px}` — the footer's own visible content (logo, text) starts here.
+  const FOOTER_PADDING_TOP = 20;
 
-  it('rests at a fixed place inside the section, not a fixed place on the screen', () => {
-    const framed = parkedPoseY(0, CLEAR, WIDTH, 800);
-    const scrolledOn = parkedPoseY(-200, CLEAR, WIDTH, 800);
+  it('rests at a fixed place inside the strip, not a fixed place on the screen', () => {
+    const framed = parkedPoseY(0, CLEAR_OFFSET, WIDTH, 800);
+    const scrolledOn = parkedPoseY(-200, CLEAR_OFFSET, WIDTH, 800);
     expect(scrolledOn).toBeCloseTo(framed - 200 / 800);
   });
 
-  it('clears the form panel at every viewport height', () => {
+  it('never rises into the section above the strip, at every plausible phone viewport height', () => {
     for (const viewportHeight of [600, 664, 800, 854, 1080]) {
-      const y = parkedPoseY(0, CLEAR, WIDTH, viewportHeight);
-      expect(topEdge(y, WIDTH) * viewportHeight).toBeGreaterThan(490);
+      const y = parkedPoseY(0, CLEAR_OFFSET, WIDTH, viewportHeight);
+      expect(topEdge(y, WIDTH) * viewportHeight).toBeGreaterThan(-SECTION_PADDING_BOTTOM);
+    }
+  });
+
+  it('never dips into the footer´s visible content, at every plausible phone viewport height', () => {
+    for (const viewportHeight of [600, 664, 800, 854, 1080]) {
+      const y = parkedPoseY(0, CLEAR_OFFSET, WIDTH, viewportHeight);
+      expect(bottomEdge(y, WIDTH) * viewportHeight).toBeLessThan(FOOTER_PADDING_TOP);
+    }
+  });
+
+  // `anchorTop=0` (used above) is the frame where the footer's top is exactly at the viewport's
+  // top edge — by then the drone, already parked above it, has legitimately scrolled off-screen,
+  // same as any other page content would. The frame that actually needs to be on-screen is the one
+  // `align` (0.3) defines as "arrived": `resolveStopOffsets` reaches this stop once the footer's
+  // top sits `align * viewportHeight` down the screen, i.e. `anchorTop = align * viewportHeight`.
+  it('resolves inside the visible viewport fraction, with margin, once the stop is actually reached', () => {
+    for (const viewportHeight of [600, 664, 800, 854, 1080]) {
+      const anchorTop = (parked.align ?? 0) * viewportHeight;
+      const y = parkedPoseY(anchorTop, CLEAR_OFFSET, WIDTH, viewportHeight);
+      expect(y).toBeGreaterThan(0.05);
+      expect(y).toBeLessThan(0.95);
     }
   });
 
   it('degrades safely without a measurable viewport', () => {
-    expect(Number.isFinite(parkedPoseY(0, CLEAR, WIDTH, 0))).toBe(true);
+    expect(Number.isFinite(parkedPoseY(0, CLEAR_OFFSET, WIDTH, 0))).toBe(true);
+  });
+});
+
+// The whole point of anchoring to `.footer-top` instead of `.contact-form-panel` is that the
+// panel's own rendered height never enters the calculation. This proves it directly: a form whose
+// step 0 renders at the CSS floor (490px) and one tall enough to model a busier step (700px, per
+// the report's own suggested range) must land the drone in exactly the same on-screen spot, once
+// each page's own footer is equally far into view.
+describe('mobile landing is unaffected by the form panel´s own height', () => {
+  const parked = MOBILE_FLIGHT_STOPS[MOBILE_FLIGHT_STOPS.length - 1];
+  const CLEAR_OFFSET = parked.clearOffset!;
+  const VIEWPORT = 844;
+  const MAX_SCROLL = 20000;
+
+  function layoutFor(panelHeight: number): Record<string, { top: number; height: number }> {
+    const contactoTop = 3400;
+    const introHeight = 260;
+    const footerTop = contactoTop + 75 + introHeight + 18 + panelHeight + 80;
+    return {
+      '.scroll-story': { top: 1200, height: 1000 },
+      '#nosotros': { top: 2500, height: 700 },
+      '.footer-top': { top: footerTop, height: 130 },
+    };
+  }
+
+  it('lands the drone at the same on-screen position for a short and a tall panel', () => {
+    const shortLayout = layoutFor(490);
+    const tallLayout = layoutFor(700);
+    const shortStops = resolveStopOffsets(MOBILE_FLIGHT_STOPS, (s) => shortLayout[s] ?? null, VIEWPORT, MAX_SCROLL);
+    const tallStops = resolveStopOffsets(MOBILE_FLIGHT_STOPS, (s) => tallLayout[s] ?? null, VIEWPORT, MAX_SCROLL);
+
+    // Scroll each page to the point where its OWN footer sits at the same screen fraction — a
+    // different absolute scroll offset per page, but the same relative moment.
+    const scrolledShort = shortLayout['.footer-top'].top - 0.3 * VIEWPORT;
+    const scrolledTall = tallLayout['.footer-top'].top - 0.3 * VIEWPORT;
+    const poseShort = flightPose(shortStops, scrolledShort, MAX_SCROLL, VIEWPORT, {
+      docTop: shortLayout['.footer-top'].top,
+      clearBelow: CLEAR_OFFSET,
+    }).pose;
+    const poseTall = flightPose(tallStops, scrolledTall, MAX_SCROLL, VIEWPORT, {
+      docTop: tallLayout['.footer-top'].top,
+      clearBelow: CLEAR_OFFSET,
+    }).pose;
+
+    expect(poseShort.y).toBeCloseTo(poseTall.y);
+  });
+});
+
+// Same battery the desktop tail already runs (see "flying from the services section into the
+// contact form" above), adapted to `MOBILE_FLIGHT_STOPS`. The reported "drops too fast" complaint
+// turned out to be the drone being off-screen for nearly the whole descent (see the bug report on
+// the final stop's comment) rather than a missing easing curve — `flightPose`'s document-space
+// blend is the exact same mechanism already proven jolt-free for desktop, so once the target is
+// on-screen this tail should read the same way. These checks confirm that rather than assume it.
+// `align: 0.65` was solved specifically for the shortest realistic phone height in this range
+// (600px) — see the stop's own comment in `drone-scene.tsx`. Running the same battery at the
+// tallest height too (1080px) confirms the margin holds across the whole range, not just at 844.
+describe.each([600, 700, 844, 1080])('flying from services into the footer on mobile (viewport %ipx)', (VIEWPORT) => {
+  const LAYOUT: Record<string, { top: number; height: number }> = {
+    '.scroll-story': { top: 1200, height: 1000 },
+    '#nosotros': { top: 2500, height: 700 },
+    '.footer-top': { top: 4300, height: 130 },
+  };
+  const MAX_SCROLL = 6000;
+  const parked = MOBILE_FLIGHT_STOPS[MOBILE_FLIGHT_STOPS.length - 1];
+  const PARKED = { docTop: LAYOUT['.footer-top'].top, clearBelow: parked.clearOffset! };
+  const stops = resolveStopOffsets(MOBILE_FLIGHT_STOPS, (selector) => LAYOUT[selector] ?? null, VIEWPORT, MAX_SCROLL);
+  const screenY = (scrolled: number) => flightPose(stops, scrolled, MAX_SCROLL, VIEWPORT, PARKED).pose.y * VIEWPORT;
+  const screenSpeed = (scrolled: number) => screenY(scrolled + 1) - screenY(scrolled);
+  const storyStop = LAYOUT['.scroll-story'].top + LAYOUT['.scroll-story'].height / 2 - VIEWPORT / 2;
+  const lastStop = stops[stops.length - 1].at * MAX_SCROLL;
+
+  it('only ever descends, from the story all the way to the footer', () => {
+    for (let scrolled = storyStop; scrolled < lastStop; scrolled += 4) {
+      expect(screenSpeed(scrolled)).toBeGreaterThan(-0.02);
+    }
+  });
+
+  it('never jolts as the services stop hands over to the footer landing', () => {
+    for (let scrolled = storyStop; scrolled < lastStop - 8; scrolled += 4) {
+      expect(Math.abs(screenSpeed(scrolled + 4) - screenSpeed(scrolled))).toBeLessThan(0.25);
+    }
+  });
+
+  it('settles above the footer without overshooting it', () => {
+    const resting = screenY(lastStop);
+    for (let scrolled = storyStop; scrolled <= lastStop; scrolled += 4) {
+      expect(screenY(scrolled)).toBeLessThanOrEqual(resting + 0.5);
+    }
   });
 });
 
