@@ -21,10 +21,11 @@ export type DroneWaypoint = {
 };
 
 export const DRONE_WAYPOINTS: DroneWaypoint[] = [
-  { at: 0, x: 0.48, y: 0.08, rotationX: 0.04, rotationY: -0.1, rotationZ: 0 },
-  { at: 0.28, x: 0.92, y: 0.56, rotationX: 0.12, rotationY: 0.34, rotationZ: -0.1 },
-  { at: 0.6, x: 0.84, y: -0.46, rotationX: -0.08, rotationY: -0.34, rotationZ: 0.12 },
-  { at: 1, x: 0.28, y: -0.72, rotationX: 0.04, rotationY: 0.16, rotationZ: -0.08 },
+  { at: 0, x: 0, y: 0.38, rotationX: 0.04, rotationY: -0.1, rotationZ: 0 },
+  { at: 0.25, x: 1.5, y: 0.9, rotationX: 0.12, rotationY: 0.34, rotationZ: -0.1 },
+  { at: 0.52, x: 1.35, y: 0.4, rotationX: -0.08, rotationY: -0.34, rotationZ: 0.12 },
+  { at: 0.76, x: 1.2, y: 0.2, rotationX: 0.04, rotationY: 0.16, rotationZ: -0.08 },
+  { at: 1, x: -0.78, y: -0.2, rotationX: 0.02, rotationY: -0.08, rotationZ: 0.03 },
 ];
 
 export function interpolateWaypoints(progress: number) {
@@ -107,8 +108,9 @@ function DroneModel({ pointer }: { pointer: PointerRef }) {
     root.rotation.z = damp(root.rotation.z, target.rotationZ, 2.8, delta);
     if (yaw) yaw.rotation.y = damp(yaw.rotation.y, targetYaw, 5, delta);
     if (pitch) pitch.rotation.x = damp(pitch.rotation.x, targetPitch, 5, delta);
+    const flightSpeed = progress > 0.88 ? 0 : 28 * (0.8 + progress * 0.2);
     for (const [index, rotor] of nodes.rotors.entries()) {
-      rotor.rotation.y += delta * (index % 2 === 0 ? 8 : -8) * (0.65 + progress * 0.35);
+      rotor.rotation.y += delta * (index % 2 === 0 ? flightSpeed : -flightSpeed);
     }
 
   });

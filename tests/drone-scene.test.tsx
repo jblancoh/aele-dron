@@ -32,9 +32,9 @@ describe('DroneScene', () => {
     const start = interpolateWaypoints(0);
     const middle = interpolateWaypoints(0.36);
     const end = interpolateWaypoints(1);
-    expect(start.x).toBeCloseTo(0.48);
+    expect(start.x).toBeCloseTo(0);
     expect(middle.x).toBeGreaterThan(0);
-    expect(end.x).toBeCloseTo(0.28);
+    expect(end.x).toBeCloseTo(-0.78);
     expect(middle.y).not.toBe(start.y);
     expect(middle.y).not.toBe(end.y);
   });

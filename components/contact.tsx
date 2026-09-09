@@ -7,19 +7,17 @@ import {RadioGroup,RadioGroupItem} from '@/components/ui/radio-group';
 import {Checkbox} from '@/components/ui/checkbox';
 import {site,eventTypes} from '@/lib/site-content';
 import {emptyInquiry,validateInquiry,localToday,formatDate,buildWhatsAppUrl,type Inquiry,type InquiryErrors} from '@/lib/contact';
-import {useMotion} from './motion-context';
 import {registerInquiryTool} from '@/lib/webmcp';
 export function Contact(){
  const [inquiry,setInquiry]=useState<Inquiry>(emptyInquiry);const [step,setStep]=useState(0);const [errors,setErrors]=useState<InquiryErrors>({});
- const title=useRef<HTMLHeadingElement>(null);const camera=useRef<HTMLDivElement>(null);const {paused,reduced}=useMotion();
+ const title=useRef<HTMLHeadingElement>(null);
  useEffect(()=>registerInquiryTool(value=>{flushSync(()=>{setInquiry(value);setStep(2);setErrors({});});title.current?.focus();}),[]);
  const move=(next:number)=>{setStep(next);setErrors({});requestAnimationFrame(()=>title.current?.focus());};
  const next=()=>{const all=validateInquiry(inquiry);const relevant=step===0?{eventType:all.eventType}:{date:all.date,location:all.location};const active=Object.fromEntries(Object.entries(relevant).filter(([,message])=>message));setErrors(active);if(!Object.keys(active).length)move(step+1);};
  const url=buildWhatsAppUrl(site.whatsappNumber,inquiry);
  const update=<K extends keyof Inquiry>(key:K,value:Inquiry[K])=>setInquiry(old=>({...old,[key]:value}));
- return <section id="contacto" className="contact-section section-shell" onPointerMove={event=>{if(paused||reduced||event.pointerType==='touch'||!camera.current)return;const rect=event.currentTarget.getBoundingClientRect();const x=(event.clientX-rect.left)/rect.width-.5;const y=(event.clientY-rect.top)/rect.height-.5;camera.current.style.setProperty('--camera-x',`${x*14}deg`);camera.current.style.setProperty('--camera-y',`${-y*10}deg`);}} onPointerLeave={()=>{camera.current?.style.setProperty('--camera-x','0deg');camera.current?.style.setProperty('--camera-y','0deg');}}>
+ return <section id="contacto" className="contact-section section-shell">
   <div className="contact-intro"><p className="eyebrow">04 / TU PRÓXIMA HISTORIA</p><h2>Todo empieza<br/>con un <em>hola.</em></h2><p>Cuéntanos qué estás imaginando.<br/>Nosotros ponemos la perspectiva.</p>
-   <div className={`camera-scene ${paused||reduced?'camera-still':''}`} ref={camera} aria-hidden="true"><span className="camera-cross camera-cross-one">+</span><img src="/media/drone-gimbal.webp" width="1100" height="734" loading="lazy" alt=""/><span className="camera-cross camera-cross-two">+</span><span className="camera-caption">LISTOS PARA ENFOCAR TU HISTORIA</span></div>
   </div>
   <div className="contact-form-panel">
    <ol className="step-track" aria-label="Pasos de cotización">{['Tu evento','Los detalles','Hablemos'].map((label,index)=><li key={label} className={index===step?'current':index<step?'complete':''} aria-current={index===step?'step':undefined}><span>{index<step?<Check size={12}/>:index+1}</span>{label}</li>)}</ol>
