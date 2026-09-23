@@ -30,7 +30,7 @@ describe('motion and data safeguards',()=>{
  afterEach(deleteConnection);
  it('clamps scroll frames to existing assets',()=>{expect(frameIndex(-1)).toBe(0);expect(frameIndex(.5)).toBe(22);expect(frameIndex(2)).toBe(44);expect(frameIndex(NaN)).toBe(0);});
  // Superseded by "hero video network gate" below: the video used to be gated on `desktop`, so
- // mobile never autoplayed regardless of network. The real cost is the 5.7MB download, not CPU
+ // mobile never autoplayed regardless of network. The real cost is the download (5.7MB, or 11MB at desktop 1080p), not CPU
  // (decode is hardware-accelerated on any phone), so the gate is network quality now, not viewport
  // width — inverted here, like other regression guards in this file, so reintroducing the old
  // `desktop` gate fails a test instead of silently shipping.
@@ -54,14 +54,14 @@ describe('responsive media policy',()=>{
  it('keeps playing the background video when the viewport shrinks to mobile mid-session',async()=>{
   const listeners=new Map<string,()=>void>();let desktop=true;
   vi.mocked(window.matchMedia).mockImplementation(query=>({get matches(){return query.includes('prefers-reduced')?false:desktop;},media:query,onchange:null,addEventListener:(_event:string,listener:EventListenerOrEventListenerObject)=>listeners.set(query,listener as ()=>void),removeEventListener:vi.fn(),addListener:vi.fn(),removeListener:vi.fn(),dispatchEvent:vi.fn()}));
-  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);expect(container.querySelector('video')).not.toBeNull();
+  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);expect(container.querySelector('video')).toHaveAttribute('src','/media/aele-hero-1080.mp4');
   desktop=false;const {act}=await import('@testing-library/react');act(()=>listeners.get('(min-width: 701px)')?.());
-  expect(container.querySelector('video')).not.toBeNull();
+  expect(container.querySelector('video')).toHaveAttribute('src','/media/aele-hero-1080.mp4');
  });
 });
 
-// The video used to be gated on `desktop` (a viewport check); the real cost is the 5.7MB
-// `aele-hero.mp4` download, not decode CPU (hardware-accelerated on any phone), so the gate is network
+// The video used to be gated on `desktop` (a viewport check); the real cost is the download
+// (5.7MB `aele-hero.mp4`, 11MB `aele-hero-1080.mp4`), not decode CPU, so the gate is network
 // quality instead — read from `motion-context.tsx`'s own `navigator.connection` subscription
 // (see its `SLOW_NETWORK_TYPES`/`networkOk` comments) rather than a second, independent read here.
 describe('hero video network gate',()=>{
@@ -88,6 +88,26 @@ describe('hero video network gate',()=>{
   mediaQuery(false,true);
   const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
   expect(container.querySelector('video')).not.toBeNull();
+ });
+
+ it('uses the sharper file on a fast desktop and the lighter file on mobile',()=>{
+  mockConnection({effectiveType:'4g'});
+  mediaQuery(false,true);
+  const desktopView=render(<MotionProvider><HeroVideo/></MotionProvider>);
+  expect(desktopView.container.querySelector('video')).toHaveAttribute('src','/media/aele-hero-1080.mp4');
+  desktopView.unmount();
+  mediaQuery(false,false);
+  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
+  expect(container.querySelector('video')).toHaveAttribute('src','/media/aele-hero.mp4');
+ });
+
+ it('uses the lighter file when a slow desktop connection starts playback by hand',async()=>{
+  mockConnection({effectiveType:'2g'});
+  mediaQuery(false,true);
+  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
+  expect(container.querySelector('video')).toBeNull();
+  await userEvent.click(screen.getByRole('button',{name:'Reproducir video de fondo'}));
+  expect(container.querySelector('video')).toHaveAttribute('src','/media/aele-hero.mp4');
  });
 
  // Safari never implements `navigator.connection` — treating that as "network unknown, therefore

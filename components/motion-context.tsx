@@ -10,7 +10,7 @@ type Connection = {
 function connection() { return (navigator as Navigator & { connection?: Connection }).connection; }
 
 /**
- * `effectiveType` values slow enough that autoplaying the hero's 5.7MB `aele-hero.mp4` would compete
+ * `effectiveType` values slow enough that autoplaying the hero (5.7MB on mobile, 11MB at 1080p on desktop) would compete
  * with the rest of the page for bandwidth. Device/GPU capability is a different signal entirely
  * (see `aele:drone-tier` in drone-scene.tsx, which measures rendering, not network) — video decode
  * is hardware-accelerated on any phone, so the video's own gate is network quality alone.
@@ -125,7 +125,7 @@ type MotionContextValue = {
   /**
    * Whether the network is fast enough to autoplay the hero's background video — see
    * `SLOW_NETWORK_TYPES`. Independent of `tier`/`capabilityTier`: those gate the WebGL drone on
-   * device/viewport/reduced-motion/Save-Data, none of which is what the video's 5.7MB download
+   * device/viewport/reduced-motion/Save-Data, none of which is what the video download
    * actually costs. `true` when `navigator.connection` (and therefore `effectiveType`) does not
    * exist at all — Safari never implements it, and an unknown network must not be treated as slow.
    */
