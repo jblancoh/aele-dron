@@ -30,12 +30,12 @@ describe('motion and data safeguards',()=>{
  afterEach(deleteConnection);
  it('clamps scroll frames to existing assets',()=>{expect(frameIndex(-1)).toBe(0);expect(frameIndex(.5)).toBe(22);expect(frameIndex(2)).toBe(44);expect(frameIndex(NaN)).toBe(0);});
  // Superseded by "hero video network gate" below: the video used to be gated on `desktop`, so
- // mobile never autoplayed regardless of network. The real cost is the 2.4MB download, not CPU
+ // mobile never autoplayed regardless of network. The real cost is the 5.7MB download, not CPU
  // (decode is hardware-accelerated on any phone), so the gate is network quality now, not viewport
  // width — inverted here, like other regression guards in this file, so reintroducing the old
  // `desktop` gate fails a test instead of silently shipping.
  it('autoplays background video on mobile when the connection is good',()=>{mediaQuery(false,false);const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);expect(container.querySelector('video')).not.toBeNull();});
- it('keeps the poster when reduced motion is requested',()=>{mediaQuery(true,true);const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);expect(container.querySelector('video')).toBeNull();expect(screen.getByRole('img')).toHaveAttribute('src','/media/coast-poster.jpg');});
+ it('keeps the poster when reduced motion is requested',()=>{mediaQuery(true,true);const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);expect(container.querySelector('video')).toBeNull();expect(screen.getByRole('img')).toHaveAttribute('src','/media/aele-hero-poster.jpg');});
  it('pauses and resumes desktop motion explicitly',async()=>{mediaQuery(false,true);render(<MotionProvider><HeroVideo/></MotionProvider>);await userEvent.click(screen.getByRole('button',{name:'Pausar movimiento'}));expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();expect(screen.getByRole('button',{name:'Reanudar movimiento'})).toHaveAttribute('aria-pressed','true');await userEvent.click(screen.getByRole('button',{name:'Reanudar movimiento'}));expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();});
  // WCAG 2.2.2: a reduced-motion visitor who manually starts the fallback video must still be able
  // to stop it. `tier` stays 'none' here (reduced motion is never overridden by a manual video
@@ -60,8 +60,8 @@ describe('responsive media policy',()=>{
  });
 });
 
-// The video used to be gated on `desktop` (a viewport check); the real cost is the 2.4MB
-// `coast.mp4` download, not decode CPU (hardware-accelerated on any phone), so the gate is network
+// The video used to be gated on `desktop` (a viewport check); the real cost is the 5.7MB
+// `aele-hero.mp4` download, not decode CPU (hardware-accelerated on any phone), so the gate is network
 // quality instead — read from `motion-context.tsx`'s own `navigator.connection` subscription
 // (see its `SLOW_NETWORK_TYPES`/`networkOk` comments) rather than a second, independent read here.
 describe('hero video network gate',()=>{
