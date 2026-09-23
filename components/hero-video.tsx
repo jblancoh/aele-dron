@@ -10,7 +10,7 @@ export function HeroVideo(){
  const [failed,setFailed]=useState(false);
  const [blocked,setBlocked]=useState(false);
  const [manuallyStarted,setManuallyStarted]=useState(false);
- // Autoplays on desktop AND mobile now — the real cost of `coast.mp4` is its 2.4MB download, not
+ // Autoplays on desktop AND mobile now — the real cost of `aele-hero.mp4` is its 5.7MB download, not
  // decode CPU (hardware-accelerated on any phone), so the gate is network quality (`networkOk`),
  // not viewport width. See `motion-context.tsx`'s `SLOW_NETWORK_TYPES` for the exact thresholds.
  const allowVideo=!reduced&&!saveData&&networkOk;
@@ -33,8 +33,8 @@ export function HeroVideo(){
   return()=>{disposed=true;observer.disconnect();document.removeEventListener('visibilitychange',sync);video.pause();};
  },[enabled,paused,reduced,manuallyStarted,failed]);
  return <>
-  <img className="hero-media" src="/media/coast-poster.jpg" width="1280" height="720" fetchPriority="high" alt="Vista aérea de una bahía tropical; imagen de muestra, no filmada por AELE"/>
-  {enabled&&!failed&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/coast-poster.jpg" src="/media/coast.mp4" aria-hidden="true" onError={()=>setFailed(true)}/>}
+  <img className="hero-media" src="/media/aele-hero-poster.jpg" width="1280" height="720" fetchPriority="high" alt="Vista aérea nocturna de fuegos artificiales sobre un estadio, filmada por AELE"/>
+  {enabled&&!failed&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/aele-hero-poster.jpg" src="/media/aele-hero.mp4" aria-hidden="true" onError={()=>setFailed(true)}/>}
   <div className="motion-control">
    {canStartVideo&&<button onClick={()=>{setManuallyStarted(true);setBlocked(false);
      // Starting the fallback video also un-pauses the single shared motion preference. Since

@@ -1,10 +1,11 @@
 # Media provenance
 
-All sample videos are third-party demonstrations, not AELE projects or verified Tabasco locations. Individual Mixkit pages explicitly identify the Stock Video Free License; the license permits commercial website use and modification. Source verification: September 4, 2026. Copies were compressed to H.264, audio removed, and posters/frames extracted for web presentation.
+The hero background is original AELE footage. Catalog clips and the scroll sequence remain third-party demonstrations, not verified as AELE projects or Tabasco locations. Individual Mixkit pages explicitly identify the Stock Video Free License; the license permits commercial website use and modification. Source verification: September 4, 2026. Copies were compressed to H.264, audio removed, and posters/frames extracted for web presentation.
 
 | Local asset | Original item | License |
 |---|---|---|
-| `public/media/coast.mp4`, coast poster and frames | [Flying over a beautiful tropical landscape](https://mixkit.co/free-stock-video/flying-over-a-beautiful-tropical-landscape-5369/) | [Mixkit Stock Video Free License](https://mixkit.co/license/#videoFree) |
+| `public/media/aele-hero.mp4` and poster | Footage supplied by AELE for the site hero. Compressed to 1280×720 H.264, audio removed. | Original work supplied by the client |
+| `public/media/coast.mp4`, coast poster and frames | [Flying over a beautiful tropical landscape](https://mixkit.co/free-stock-video/flying-over-a-beautiful-tropical-landscape-5369/). Still used by the catalog card and the scroll sequence, not by the hero. | [Mixkit Stock Video Free License](https://mixkit.co/license/#videoFree) |
 | `public/media/concert.mp4` and poster | [Audience at a concert](https://mixkit.co/free-stock-video/audience-at-a-concert-4269/) | Same Free License |
 | `public/media/wedding.mp4` and poster | [Happy newlyweds posing](https://mixkit.co/free-stock-video/happy-newlyweds-posing-40601/) | Same Free License |
 
