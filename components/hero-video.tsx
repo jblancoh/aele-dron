@@ -3,18 +3,25 @@
 import { useEffect,useRef,useState } from 'react';
 import { Pause,Play } from 'lucide-react';
 import { useMotion } from './motion-context';
+const HERO_SHARP='/media/aele-hero-1080.mp4';
+const HERO_LIGHT='/media/aele-hero.mp4';
 export function HeroVideo(){
  const ref=useRef<HTMLVideoElement>(null);
- const {paused,reduced,saveData,networkOk,tier,toggle}=useMotion();
+ const {paused,reduced,saveData,networkOk,desktop,tier,toggle}=useMotion();
 
  const [failed,setFailed]=useState(false);
  const [blocked,setBlocked]=useState(false);
  const [manuallyStarted,setManuallyStarted]=useState(false);
- // Autoplays on desktop AND mobile now — the real cost of `aele-hero.mp4` is its 5.7MB download, not
- // decode CPU (hardware-accelerated on any phone), so the gate is network quality (`networkOk`),
- // not viewport width. See `motion-context.tsx`'s `SLOW_NETWORK_TYPES` for the exact thresholds.
+ // Autoplays on desktop AND mobile — decode is hardware-accelerated, so whether to play is network
+ // quality (`networkOk`), not viewport width. Viewport only picks the file: 1080p on a fast desktop,
+ // 720p on mobile or when a slow connection starts the video by hand. See `SLOW_NETWORK_TYPES`.
  const allowVideo=!reduced&&!saveData&&networkOk;
  const enabled=allowVideo||manuallyStarted;
+ // Latched when the element mounts. Resizing across the desktop breakpoint must not swap files
+ // mid-loop; clearing it on unmount lets the next mount choose again.
+ const latchedSrc=useRef<string|null>(null);
+ if(!enabled||failed)latchedSrc.current=null;
+ else if(latchedSrc.current===null)latchedSrc.current=desktop&&networkOk?HERO_SHARP:HERO_LIGHT;
  // WCAG 2.2.2: any tier that can animate something (the hero video on any device with a good
  // connection, and the lite-tier drone) must expose a way to stop it. Once the
  // visitor has paused, the control must stay reachable regardless of tier so resuming is possible.
@@ -34,7 +41,7 @@ export function HeroVideo(){
  },[enabled,paused,reduced,manuallyStarted,failed]);
  return <>
   <img className="hero-media" src="/media/aele-hero-poster.jpg" width="1280" height="720" fetchPriority="high" alt="Vista aérea nocturna de fuegos artificiales sobre un estadio, filmada por AELE"/>
-  {enabled&&!failed&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/aele-hero-poster.jpg" src="/media/aele-hero.mp4" aria-hidden="true" onError={()=>setFailed(true)}/>}
+  {enabled&&!failed&&latchedSrc.current&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/aele-hero-poster.jpg" src={latchedSrc.current} aria-hidden="true" onError={()=>setFailed(true)}/>}
   <div className="motion-control">
    {canStartVideo&&<button onClick={()=>{setManuallyStarted(true);setBlocked(false);
      // Starting the fallback video also un-pauses the single shared motion preference. Since
