@@ -24,7 +24,9 @@ The export is `dist/client`. Keep `.openai/hosting.json` bound to its existing S
 
 ## Media behavior
 
-- Hero starts muted only on desktop without reduced-motion or Save-Data preferences. Mobile begins with a 76 KB poster and an explicit play control.
+- Hero starts muted on desktop and mobile when reduced motion, Save-Data, and the network gate allow
+  it. Slow-2G/2G/3G (including DevTools' Slow 4G profile when Chrome reports it as 3G) keep the
+  76 KB poster and an explicit play control instead.
 - Catalog videos mount on dialog open and start only through player controls. Escape closes the dialog and restores trigger focus.
 - Frames load in batches only near the scroll section. New batches stop offscreen or in hidden tabs. Small viewports, Save-Data and reduced motion use a compact still-image section.
 - The pause control stops automatic hero/scroll/gimbal motion. Pointer motion does not affect touch interactions or reduced-motion users.
@@ -32,14 +34,14 @@ The export is `dist/client`. Keep `.openai/hosting.json` bound to its existing S
 
 ### 3D drone
 
-- The interactive drone renders in one of three motion tiers — `full` (desktop, fixed to the viewport, scroll-linked flight through the page), `lite` (mobile/tablet, a bounded hover canvas clipped to the hero), or `none` (nothing rendered). The tier is decided by measuring the running session, not by screen width: `prefers-reduced-motion`, Save-Data, an explicit visitor preference, and a runtime performance verdict (drei's `PerformanceMonitor`/`AdaptiveDpr`, plus a `webglcontextlost` listener) all feed into it. A device that starts on `lite` and then measurably struggles (or loses its WebGL context) degrades to `none` for the rest of that session; the verdict is remembered (with a version and a ~30-day TTL) so a later visit does not pay for the GLB fetch and a WebGL context only to fail again.
+- The interactive drone renders in one of three motion tiers — `full` (desktop, fixed to the viewport, scroll-linked flight through the page), `lite` (mobile/tablet, fixed low-cost scroll-linked flight), or `none` (nothing rendered). The tier is decided by measuring the running session, not by screen width: `prefers-reduced-motion`, Save-Data, an explicit visitor preference, and a runtime performance verdict (drei's `PerformanceMonitor`/`AdaptiveDpr`, plus a `webglcontextlost` listener) all feed into it. A device that starts on `lite` and then measurably struggles (or loses its WebGL context) degrades to `none` for the rest of that session; the measured low-FPS fallback is configured with a finite flip-flop budget so it can actually fire, and its verdict is remembered (with a version and a ~30-day TTL) so a later visit does not pay for the GLB fetch and a WebGL context only to fail again.
 - The visitor's motion preference (on/off) persists across visits, independently of that performance verdict — one is what the visitor asked for, the other is what the device can actually run.
 - The pause control stops the drone by freezing it in place (WCAG 2.2.2, Level A) rather than unmounting it, so resuming is instant and the composition never jumps. The control is reachable on mobile as well as desktop, alongside the existing "play background" action.
 - `.hero` must never receive `transform`, `filter`, `will-change`, or `contain`. Any of those creates a containing block for fixed-position descendants, and the desktop drone depends on staying `position:fixed` (while living inside `.hero` in the DOM) to escape `.hero`'s own `overflow:hidden` and cover the full viewport. Adding one of those properties would silently clip the desktop drone to the hero's box.
 
 ## Verification notes
 
-Unit/integration tests cover validation, message encoding, the unconfigured state, dialog focus/error handling, responsive motion and frame scheduling. Tests for the primary catalog/contact behavior were written and observed failing before implementation, then passed. Later review fixes include regression tests.
+Unit/integration tests cover validation, message encoding, the unconfigured state, dialog focus/error handling, responsive motion and frame scheduling. Motion tests cover live DevTools-style `prefers-reduced-motion` changes (including older WebView media-query listeners), pause persistence across a module reload, Slow 4G's network gate, and the finite measured-performance fallback. Tests for the primary catalog/contact behavior were written and observed failing before implementation, then passed. Later review fixes include regression tests.
 
 WebMCP `prepare_event_inquiry` is optional and prepare-only. Its mocked registry contract is tested; native browser registry validation is not yet performed. Unsupported browsers retain the normal form.
 

@@ -649,7 +649,10 @@ function SceneCanvas({
           <pointLight position={[0, -2, 3]} intensity={0.65} color="#d8e7f0" distance={10} />
         </>
       )}
-      <PerformanceMonitor onFallback={handleFallback}>
+      {/* drei defaults `flipflops` to Infinity, which makes `onFallback` unreachable. A single
+          sustained low-FPS decline is enough to remove this expensive scene; `iterations`, `ms`
+          and `threshold` still keep isolated slow frames from triggering it. */}
+      <PerformanceMonitor flipflops={0} onFallback={handleFallback}>
         <AdaptiveDpr />
         <AdaptiveEvents />
         <Suspense fallback={null}>

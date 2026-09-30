@@ -18,10 +18,11 @@ export function HeroVideo(){
  const allowVideo=!reduced&&!saveData&&networkOk;
  const enabled=allowVideo||manuallyStarted;
  // Latched when the element mounts. Resizing across the desktop breakpoint must not swap files
- // mid-loop; clearing it on unmount lets the next mount choose again.
- const latchedSrc=useRef<string|null>(null);
- if(!enabled||failed)latchedSrc.current=null;
- else if(latchedSrc.current===null)latchedSrc.current=desktop&&networkOk?HERO_SHARP:HERO_LIGHT;
+ // mid-loop; clearing it on unmount lets the next mount choose again. Kept in state (adjusted
+ // during render) rather than a ref, since reading a ref during render breaks the React Compiler.
+ const [latchedSrc,setLatchedSrc]=useState<string|null>(null);
+ const videoSrc=enabled&&!failed?latchedSrc??(desktop&&networkOk?HERO_SHARP:HERO_LIGHT):null;
+ if(videoSrc!==latchedSrc)setLatchedSrc(videoSrc);
  // WCAG 2.2.2: any tier that can animate something (the hero video on any device with a good
  // connection, and the lite-tier drone) must expose a way to stop it. Once the
  // visitor has paused, the control must stay reachable regardless of tier so resuming is possible.
@@ -41,7 +42,7 @@ export function HeroVideo(){
  },[enabled,paused,reduced,manuallyStarted,failed]);
  return <>
   <img className="hero-media" src="/media/aele-hero-poster.jpg" width="1280" height="720" fetchPriority="high" alt="Vista aérea nocturna de fuegos artificiales sobre un estadio, filmada por AELE"/>
-  {enabled&&!failed&&latchedSrc.current&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/aele-hero-poster.jpg" src={latchedSrc.current} aria-hidden="true" onError={()=>setFailed(true)}/>}
+  {videoSrc&&<video ref={ref} className="hero-media" muted playsInline loop preload="none" poster="/media/aele-hero-poster.jpg" src={videoSrc} aria-hidden="true" onError={()=>setFailed(true)}/>}
   <div className="motion-control">
    {canStartVideo&&<button onClick={()=>{setManuallyStarted(true);setBlocked(false);
      // Starting the fallback video also un-pauses the single shared motion preference. Since
