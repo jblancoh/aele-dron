@@ -19,7 +19,7 @@ The export is `dist/client`. Keep `.openai/hosting.json` bound to its existing S
 
 1. Set `site.whatsappNumber` in `lib/site-content.ts` to the real international number. Until then, the contact summary explicitly states that WhatsApp is unconfigured and offers Instagram; nothing is sent.
 2. Replace the demo entries in `portfolio` with approved AELE footage and posters, and change `demo` only for real work. Keep file paths, dimensions and aspect ratios aligned.
-3. Replace the hero/scroll sample if desired. The sequence has 45 JPEG frames named `coast-01.jpg` through `coast-45.jpg` under `public/media/frames`. Update both sequence settings and assets together.
+3. The perspective scroll sequence uses 45 JPEG frames named `baner-01.jpg` through `baner-45.jpg` under `public/media/frames`, generated from the supplied Baner video, with `public/media/baner-poster.jpg` as its static fallback.
 4. Confirm real business claims and contact information. The private preview uses `noindex`; enable indexing only for the commercial public launch.
 
 ## Media behavior

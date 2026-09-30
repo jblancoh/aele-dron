@@ -49,17 +49,19 @@ No other page, unrelated media, remote service, or feature is authorized. Do not
 
 ### VID-2 — Replace «La perspectiva» frame sequence
 
-- [ ] Add/update regression coverage first for the 45-frame sequence mapping and the existing poster fallback conditions.
-- [ ] Observe RED, then generate 45 ordered optimized browser-friendly frames from `5 Baner Final.mp4` and update the perspective sequence to use them.
-- [ ] Update the poster if the current poster depicts the removed footage; verify the replacement is suitable for poster fallback.
-- [ ] Remove the old `public/media/frames/coast-01.jpg` through `coast-45.jpg` assets only after the new sequence is integrated and verified.
-- [ ] Preserve canvas scroll scrubbing and mobile, reduced-motion, and save-data poster behavior; remove inaccurate demo/Mixkit copy where applicable.
-- [ ] Refactor and run focused frame-loading tests, `npm run typecheck`, and `npm run lint`; record exact outcomes.
+- [x] Add/update regression coverage first for the 45-frame sequence mapping and the existing poster fallback conditions.
+- [x] Observe RED, then generate 45 ordered optimized browser-friendly frames from `5 Baner Final.mp4` and update the perspective sequence to use them.
+- [x] Update the poster if the current poster depicts the removed footage; verify the replacement is suitable for poster fallback.
+- [x] Remove the old `public/media/frames/coast-01.jpg` through `coast-45.jpg` assets only after the new sequence is integrated and verified.
+- [x] Preserve canvas scroll scrubbing and mobile, reduced-motion, and save-data poster behavior; remove inaccurate demo/Mixkit copy where applicable.
+- [x] Refactor and run focused frame-loading tests, `npm run typecheck`, and `npm run lint`; record exact outcomes.
 - [ ] Commit this work unit with a Conventional Commit message and record its commit identity here.
 
 **Route:** delegated direct (writer), because preparation and implementation span `components/scroll-story.tsx`, `lib/scroll.ts`, frame assets, poster media, and `tests/frame-loading.test.tsx`. Keep tests and implementation together; generated frame assets are delivery media and excluded from the authored-line estimate.
 
 **Acceptance:** the scroll sequence contains exactly 45 ordered frames derived from `5 Baner Final.mp4`; the previous coast frame assets are removed; scroll-scrubbing remains functional; poster fallback still applies on mobile, reduced motion, and save-data; relevant tests and applicable checks pass.
+
+**Verification:** RED — `npm test -- tests/frame-loading.test.tsx` failed: `frameSrc` was missing and the rendered poster still pointed at `/media/coast-poster.jpg` (the new fallback expectations failed); the initial run also exposed shared mock-state leakage, which was reset in test setup. GREEN — `npm test -- tests/frame-loading.test.tsx tests/motion.test.tsx`: 2 files, 25 tests passed; `npm run typecheck`: passed; `npm run lint`: failed only with 4 existing `react-compiler` errors in unchanged `components/hero-video.tsx` at lines 23 and 44. Generated 45 960×540 JPEG frames sampled at 4.5 fps from the 3840×2160 source (45 files; 912 KB total) and a 1280×720 poster; inspected poster visually. Removed all 45 coast frames and the obsolete coast poster after the new sequence and poster tests passed. Runtime harness: N/A — static scroll/canvas component; focused jsdom tests exercise frame scheduling and poster gating.
 
 **Commit:** pending.
 
@@ -67,7 +69,7 @@ No other page, unrelated media, remote service, or feature is authorized. Do not
 
 - **TDD mode:** strict; source: `AGENTS.md`.
 - **Test runner/checks:** `npm test`; `npm run typecheck`; `npm run lint` (applicable checks per work unit).
-- **Current progress:** VID-1 implementation, verification, and work-unit commit are complete. VID-2 has not started.
+- **Current progress:** VID-1 implementation, verification, and work-unit commit are complete. VID-2 behavior, media, tests, and typecheck are complete; lint remains blocked by the known errors in unchanged `components/hero-video.tsx`, so VID-2 is partial pending the local work-unit commit and resolution of that baseline check.
 - **Verification evidence:** see VID-1 for observed RED/GREEN outcomes and check results. `npm ci` required `--legacy-peer-deps` for the existing Vite 8/Tailwind peer range; Vitest's existing setup also required the missing `@testing-library/dom` package locally (installed with `--no-save`, not added to project manifests).
 - **Commits:** VID-1 `b9c51d3`; VID-2 pending.
-- **Next step:** implement VID-2, verify it, and record its commit before closing the feature.
+- **Next step:** commit VID-2 and record its commit identity before closing the feature.
