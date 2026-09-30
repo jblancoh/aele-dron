@@ -8,11 +8,10 @@ export const site = {
 export type PortfolioItem = {
   id: string; title: string; category: string; description: string;
   poster: string; video: string; aspect: 'wide' | 'portrait';
-  demo: boolean; source: string; license: string;
 };
 export const portfolio: PortfolioItem[] = [
-  {id:'concert',title:'La energía de estar ahí',category:'CONCIERTOS Y FESTIVALES',description:'Luces, música y miles de emociones en un mismo lugar.',poster:'/media/concert-poster.jpg',video:'/media/concert.mp4',aspect:'wide',demo:true,source:'https://mixkit.co/free-stock-video/audience-at-a-concert-4269/',license:'https://mixkit.co/license/#videoFree'},
-  {id:'wedding',title:'Un sí. Todo un mundo.',category:'BODAS Y CELEBRACIONES',description:'Esos instantes que se quedan contigo para siempre.',poster:'/media/wedding-poster.jpg',video:'/media/wedding.mp4',aspect:'portrait',demo:true,source:'https://mixkit.co/free-stock-video/happy-newlyweds-posing-40601/',license:'https://mixkit.co/license/#videoFree'},
-  {id:'coast',title:'El escenario también cuenta',category:'ESPACIOS Y PERSPECTIVAS',description:'Una nueva forma de descubrir el lugar donde todo sucede.',poster:'/media/coast-poster.jpg',video:'/media/coast.mp4',aspect:'wide',demo:true,source:'https://mixkit.co/free-stock-video/flying-over-a-beautiful-tropical-landscape-5369/',license:'https://mixkit.co/license/#videoFree'},
+  {id:'jac-veracruz',title:'JAC Veracruz',category:'JAC VERACRUZ',description:'Una pieza audiovisual de JAC Veracruz.',poster:'/media/jac-veracruz-poster.jpg',video:'/media/jac-veracruz.mp4',aspect:'wide'},
+  {id:'hyper-vsa',title:'Hyper Vsa',category:'HYPER VSA',description:'Una pieza audiovisual de Hyper Vsa.',poster:'/media/hyper-vsa-poster.jpg',video:'/media/hyper-vsa.mp4',aspect:'wide'},
+  {id:'day-to-night',title:'Day to night',category:'DAY TO NIGHT',description:'Una transición visual del día a la noche.',poster:'/media/day-to-night-poster.jpg',video:'/media/day-to-night.mp4',aspect:'portrait'},
 ];
 export const eventTypes = ['Boda','XV años','Concierto o festival','Evento deportivo','Evento corporativo','Otro evento'] as const;

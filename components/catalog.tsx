@@ -9,17 +9,15 @@ function Film({item,index}:{item:PortfolioItem;index:number}){
  return <article className={`film film-${item.aspect} film-${index}`}>
   <Dialog open={open} onOpenChange={value=>{setOpen(value);if(value)setFailed(false);}}>
    <DialogTrigger className="film-trigger" aria-label={`Ver ${item.title}`}>
-    <img src={item.poster} alt="" width="1280" height="720" loading="lazy" decoding="async"/>
+    <img src={item.poster} alt="" width={item.aspect==='wide'?1280:720} height={item.aspect==='wide'?720:1280} loading="lazy" decoding="async"/>
     <span className="film-vignette"/><span className="film-index">0{index+1}</span>
-    {item.demo&&<span className="sample-tag film-sample">MUESTRA</span>}
     <span className="film-play"><Play size={18} fill="currentColor"/><span>VER VIDEO</span></span>
     <span className="film-image-caption">{item.category}<ArrowUpRight size={22}/></span>
    </DialogTrigger>
    <DialogContent className="film-dialog" showCloseButton={false}>
     <div className="player-heading"><DialogTitle>{item.title}</DialogTitle><DialogClose className="icon-button" aria-label="Cerrar video"><X size={23}/></DialogClose></div>
-    <DialogDescription>{item.demo?'Video de muestra de Mixkit. No es un proyecto realizado por AELE.':item.description}</DialogDescription>
+    <DialogDescription>{item.description}</DialogDescription>
     {open&&(failed?<div className="player-error"><img src={item.poster} alt="Vista previa del video"/><p role="alert">No pudimos cargar el video. Puedes intentarlo de nuevo.</p><button className="pill" onClick={()=>{setAttempt(n=>n+1);setFailed(false);}}>Reintentar</button></div>:<video key={attempt} className="catalog-video" src={item.video} poster={item.poster} muted playsInline controls preload="metadata" aria-label={item.title} onError={()=>setFailed(true)}/>)}
-    {item.demo&&<a className="source-link" href={item.source} target="_blank" rel="noreferrer">Fuente y licencia del video <ArrowUpRight size={14}/></a>}
    </DialogContent>
   </Dialog>
   <div className="film-caption"><div><h3>{item.title}</h3><p>{item.description}</p></div><span>0{index+1} / 0{portfolio.length}</span></div>
