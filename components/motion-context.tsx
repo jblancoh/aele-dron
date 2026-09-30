@@ -68,24 +68,44 @@ function preferenceBits(preference: MotionPreference) {
   return 0;
 }
 
+type MediaQueryListWithLegacyListener = MediaQueryList & {
+  addListener?: (callback: () => void) => void;
+  removeListener?: (callback: () => void) => void;
+};
+
+/**
+ * Chrome DevTools and current browsers expose the event-target API. Older Safari/WebViews still
+ * expose only addListener/removeListener; keeping the fallback means a live reduced-motion
+ * emulation change cannot throw during subscription and leave the page on the wrong policy.
+ */
+function subscribeMediaQuery(query: string, callback: () => void) {
+  const media = window.matchMedia(query) as MediaQueryListWithLegacyListener;
+  if (typeof media.addEventListener === 'function') {
+    media.addEventListener('change', callback);
+    return () => media.removeEventListener('change', callback);
+  }
+  // oxlint-disable-next-line typescript/no-deprecated -- legacy Safari/WebView fallback.
+  media.addListener?.(callback);
+  // oxlint-disable-next-line typescript/no-deprecated -- legacy Safari/WebView fallback.
+  return () => media.removeListener?.(callback);
+}
+
 function subscribe(callback: () => void) {
   listeners.add(callback);
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const desktop = window.matchMedia(DESKTOP_QUERY);
   const network = connection();
   const onStorage = (event: StorageEvent) => {
     if (event.key !== STORAGE_KEY && event.key !== null) return;
     cachedPreference = null;
     notify();
   };
-  reduced.addEventListener('change', callback);
-  desktop.addEventListener('change', callback);
+  const unsubscribeReduced = subscribeMediaQuery('(prefers-reduced-motion: reduce)', callback);
+  const unsubscribeDesktop = subscribeMediaQuery(DESKTOP_QUERY, callback);
   network?.addEventListener?.('change', callback);
   window.addEventListener('storage', onStorage);
   return () => {
     listeners.delete(callback);
-    reduced.removeEventListener('change', callback);
-    desktop.removeEventListener('change', callback);
+    unsubscribeReduced();
+    unsubscribeDesktop();
     network?.removeEventListener?.('change', callback);
     window.removeEventListener('storage', onStorage);
   };
