@@ -79,17 +79,20 @@ vi.mock('@react-three/fiber', () => ({
 }));
 // Captures the `onFallback` handler `SceneCanvas` registers so tests can invoke it directly,
 // standing in for drei's real FPS sampling.
-const performanceMonitor: { onFallback?: (api: unknown) => void } = {};
+const performanceMonitor: { onFallback?: (api: unknown) => void; flipflops?: number } = {};
 vi.mock('@react-three/drei', () => ({
   useGLTF: Object.assign(vi.fn(() => ({ scene: { getObjectByName: () => undefined } })), { preload: () => undefined }),
   PerformanceMonitor: ({
     children,
     onFallback,
+    flipflops,
   }: {
     children?: React.ReactNode;
     onFallback?: (api: unknown) => void;
+    flipflops?: number;
   }) => {
     performanceMonitor.onFallback = onFallback;
+    performanceMonitor.flipflops = flipflops;
     return <>{children}</>;
   },
   AdaptiveDpr: () => null,
@@ -102,6 +105,7 @@ afterEach(() => {
   motion.capabilityTier = undefined;
   motion.paused = false;
   performanceMonitor.onFallback = undefined;
+  performanceMonitor.flipflops = undefined;
   lastCreatedGl = null;
 });
 
@@ -474,6 +478,16 @@ describe('DroneScene — measured performance degradation', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('configures a finite fallback budget so sustained low FPS can degrade on a real device', () => {
+    motion.tier = 'full';
+    render(<DroneScene />);
+
+    // drei defaults flipflops to Infinity, which means its onFallback callback can never fire.
+    // Keep the measured safeguard real: one sustained decline is enough to remove this expensive
+    // scene, while the monitor's own iterations/threshold still filter transient frames.
+    expect(performanceMonitor.flipflops).toBe(0);
   });
 
   it('unmounts and persists a low verdict when the performance monitor falls back after warm-up', () => {
