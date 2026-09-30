@@ -2,6 +2,7 @@
 import {ArrowDown,ArrowUpRight,Play,Camera,MoveUpRight,Focus,Aperture} from 'lucide-react';
 import {Catalog} from '@/components/catalog';
 import {Contact} from '@/components/contact';
+import {CreatorCredit} from '@/components/creator-credit';
 import {MotionProvider} from '@/components/motion-context';
 import {DroneScene} from '@/components/drone-scene';
 import {HeroVideo} from '@/components/hero-video';
@@ -29,6 +30,6 @@ export default function Home(){
   ].map(({number,icon:Icon,title,copy})=><div className="service-row" key={number}><span className="service-number">{number}</span><div><h3>{title}</h3><p>{copy}</p></div><Icon size={28} strokeWidth={1}/></div>)}</div></section>
   <div className="local-band"><span>DESDE TABASCO.</span><span className="local-star" aria-hidden="true">✳</span><span>PARA VER MÁS ALLÁ.</span><ArrowUpRight aria-hidden="true" size={56} strokeWidth={1}/></div>
   <Contact/>
-  <footer className="site-footer"><div className="footer-top"><a className="brand" href="#inicio" aria-label="AELE, volver al inicio"><img src="/media/aele-logo.png" width="104" height="104" alt="aele·dron" loading="lazy"/></a><p>Una mirada diferente.<br/><span>Villahermosa, Tabasco, México.</span></p><a className="text-link" href={site.instagram} target="_blank" rel="noreferrer"><Camera size={17}/> @aele.dron <ArrowUpRight size={16}/></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} AELE · Videografía con drones</span><details className="media-credits"><summary>Créditos del sitio</summary><p>Imagen conceptual de cámara generada con IA; no identifica equipo de la empresa. Logo proporcionado por AELE.</p></details><a href="#inicio">VOLVER ARRIBA ↑</a></div></footer>
+  <footer className="site-footer"><div className="footer-top"><a className="brand" href="#inicio" aria-label="AELE, volver al inicio"><img src="/media/aele-logo.png" width="104" height="104" alt="aele·dron" loading="lazy"/></a><p>Una mirada diferente.<br/><span>Villahermosa, Tabasco, México.</span></p><a className="text-link" href={site.instagram} target="_blank" rel="noreferrer"><Camera size={17}/> @aele.dron <ArrowUpRight size={16}/></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} AELE · Videografía con drones</span><details className="media-credits"><summary>Créditos del sitio</summary><p>Imagen conceptual de cámara generada con IA; no identifica equipo de la empresa. Logo proporcionado por AELE.</p></details><CreatorCredit/><a href="#inicio">VOLVER ARRIBA ↑</a></div></footer>
  </main></MotionProvider>;
 }
