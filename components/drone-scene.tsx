@@ -13,19 +13,23 @@ const ROTOR_NAMES = ['Rotor_FL', 'Rotor_FR', 'Rotor_RL', 'Rotor_RR'];
 /**
  * Measured, not predicted: `useDetectGPU` was rejected (see the plan) because it is a device
  * lookup table — it downloads a benchmark JSON at runtime and still misses new Android GPUs.
- * Instead, drei's `PerformanceMonitor` samples the running session's own frame times, and a lost
- * WebGL context is treated as the catastrophic version of the same signal (see `SceneCanvas`).
- * Both land on the same verdict, kept in a storage key separate from `aele:motion` (the visitor's
- * own preference in motion-context.tsx) because this one is capacity, not preference, and the
- * visitor never opted into it.
+ * Instead, drei's `PerformanceMonitor` samples the running session's own frame times. Sustained
+ * low FPS degrades the scene from the `full` to the cheaper `lite` profile — it NEVER removes the
+ * drone — and that `lite` verdict is kept in a storage key separate from `aele:motion` (the
+ * visitor's own preference in motion-context.tsx) because this one is capacity, not preference,
+ * and the visitor never opted into it. A lost WebGL context is the catastrophic case: nothing
+ * can render, so it hides the drone for the current session only and is never persisted (see
+ * `SceneCanvas`).
  */
 const DRONE_TIER_STORAGE_KEY = 'aele:drone-tier';
 /**
  * Bumped whenever the scene itself gets more expensive to render — new geometry, shadows, or
  * materials. A verdict measured against last month's cheaper scene should not silently suppress
- * the drone under a heavier one it never actually failed on (and vice versa).
+ * the drone under a heavier one it never actually failed on (and vice versa). Version 2 also
+ * retired the v1 `'low'` verdict, which used to unmount the drone outright: scroll-time frame
+ * drops wrongly wrote it for many visitors, so every v1 entry is ignored.
  */
-const DRONE_TIER_VERSION = 1;
+const DRONE_TIER_VERSION = 2;
 const DRONE_TIER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * `PerformanceMonitor` measures `useFrame` timing, not raw device speed, so the GLB parse and
@@ -34,14 +38,14 @@ const DRONE_TIER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  */
 const PERFORMANCE_WARM_UP_MS = 1400;
 
-type DroneTierVerdict = { v: number; verdict: 'low'; at: number };
+type DroneTierVerdict = { v: number; verdict: 'lite'; at: number };
 
-function readLowVerdict(): DroneTierVerdict | null {
+function readLiteVerdict(): DroneTierVerdict | null {
   try {
     const raw = window.localStorage.getItem(DRONE_TIER_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<DroneTierVerdict>;
-    if (parsed.v !== DRONE_TIER_VERSION || parsed.verdict !== 'low' || typeof parsed.at !== 'number') return null;
+    if (parsed.v !== DRONE_TIER_VERSION || parsed.verdict !== 'lite' || typeof parsed.at !== 'number') return null;
     if (Date.now() - parsed.at > DRONE_TIER_TTL_MS) return null;
     return parsed as DroneTierVerdict;
   } catch {
@@ -50,9 +54,9 @@ function readLowVerdict(): DroneTierVerdict | null {
   }
 }
 
-function persistLowVerdict() {
+function persistLiteVerdict() {
   try {
-    const verdict: DroneTierVerdict = { v: DRONE_TIER_VERSION, verdict: 'low', at: Date.now() };
+    const verdict: DroneTierVerdict = { v: DRONE_TIER_VERSION, verdict: 'lite', at: Date.now() };
     window.localStorage.setItem(DRONE_TIER_STORAGE_KEY, JSON.stringify(verdict));
   } catch {
     // Write blocked (e.g. private browsing): the verdict just won't survive a reload.
@@ -616,8 +620,8 @@ function SceneCanvas({
       // R3F's own `performance.min` defaults to 0.5, which is also left at its default here: below
       // that floor `AdaptiveDpr` would keep shrinking the render resolution into visibly blurry
       // territory before `onFallback` ever gets a chance to fire. `onFallback` (below) is the
-      // actual safety valve — a scene bad enough to need more than a 2x resolution cut is a scene
-      // that should be unmounted, not rendered small and mushy.
+      // actual safety valve — a scene bad enough to need more than a 2x resolution cut is moved
+      // to the `lite` profile (see `DroneScene`), not rendered small and mushy.
       onCreated={({ gl }) => {
         gl.outputColorSpace = SRGBColorSpace;
         gl.toneMapping = ACESFilmicToneMapping;
@@ -627,10 +631,11 @@ function SceneCanvas({
           gl.shadowMap.type = PCFSoftShadowMap;
         }
         // `PerformanceMonitor` below covers the gradual, measured case (frame times sagging) and
-        // its verdict is worth persisting. A lost WebGL context is not a performance measurement —
-        // a driver reset/update, the browser evicting a context under GPU/tab pressure, or a laptop
-        // waking from sleep can all fire it on a perfectly capable desktop — so it degrades only
-        // this session via `handleContextLost`, never `persistLowVerdict()`.
+        // its `lite` verdict is worth persisting. A lost WebGL context is not a performance
+        // measurement — a driver reset/update, the browser evicting a context under GPU/tab
+        // pressure, or a laptop waking from sleep can all fire it on a perfectly capable desktop —
+        // so it hides the drone for this session only via `handleContextLost`, never
+        // `persistLiteVerdict()`.
         gl.domElement.addEventListener('webglcontextlost', handleContextLost);
       }}
       camera={{ fov: 30, position: [0, CAMERA_Y, 6.2], near: 0.1, far: 100 }}
@@ -650,8 +655,9 @@ function SceneCanvas({
         </>
       )}
       {/* drei defaults `flipflops` to Infinity, which makes `onFallback` unreachable. A single
-          sustained low-FPS decline is enough to remove this expensive scene; `iterations`, `ms`
-          and `threshold` still keep isolated slow frames from triggering it. */}
+          sustained low-FPS decline is enough to degrade this expensive scene to the lite profile
+          (never to remove it); `iterations`, `ms` and `threshold` still keep isolated slow frames
+          from triggering it. */}
       <PerformanceMonitor flipflops={0} onFallback={handleFallback}>
         <AdaptiveDpr />
         <AdaptiveEvents />
@@ -721,17 +727,23 @@ function useDeferredCanvasMount(profile: DroneProfile) {
 export function DroneScene() {
   const { paused, capabilityTier } = useMotion();
   // Both the full (desktop) and lite (mobile) profiles fly the scroll now — only `none` (reduced
-  // motion, Save-Data, or a failed performance verdict) renders nothing.
+  // motion or Save-Data) renders nothing. A failed performance verdict never does: it only moves
+  // the scene to the `lite` profile.
   //
   // WCAG 2.2.2 (Level A): the hero's pause control must be able to stop this animation, and
   // README.md's "Media behavior" section documents that it does. "Stopping" the drone means
   // freezing it in place (frameloop='never') rather than tearing it down, so resuming is instant
   // and the composition does not jump. That is why eligibility reads `capabilityTier`, which
-  // ignores the pause: a pause must not unmount the canvas, but reduced motion, Save-Data, or a
-  // performance verdict changing mid-session must, because those say the session can no longer
-  // run the drone at all.
+  // ignores the pause: a pause must not unmount the canvas, but reduced motion or Save-Data
+  // changing mid-session must, because those say the session can no longer run the drone at all.
   const eligible = capabilityTier !== 'none';
-  const profile: DroneProfile = capabilityTier === 'lite' ? 'lite' : 'full';
+  const capabilityProfile: DroneProfile = capabilityTier === 'lite' ? 'lite' : 'full';
+
+  // A measured low-FPS verdict (this session's, or a stored one from a previous visit — see
+  // `readLiteVerdict`) degrades `full` to `lite`; it never removes the drone. Lazily initialised so
+  // the storage read runs once, on mount, rather than on every render.
+  const [perfLite, setPerfLite] = useState(() => readLiteVerdict() !== null);
+  const profile: DroneProfile = perfLite ? 'lite' : capabilityProfile;
 
   // If motion was already turned off before this component ever mounted, there is no running
   // drone to preserve by freezing — mounting one anyway would just pay for the GLB fetch and a
@@ -745,25 +757,25 @@ export function DroneScene() {
   // any `paused === true` (whenever it becomes known) keeps the scene unmounted; once the session
   // has genuinely run the drone at least once, a later pause correctly freezes rather than
   // unmounts. `eligible` stays ANDed unconditionally, so a real capability loss (reduced motion,
-  // Save-Data, a failed performance verdict) still unmounts regardless of `everMounted` — this is
+  // Save-Data) still unmounts regardless of `everMounted` — this is
   // not the one-way "stays visible forever" latch that caused a prior bug.
   const everMounted = useRef(false);
 
-  // A low verdict from a previous session (see `readLowVerdict`) means this device — or this
-  // scene, if `DRONE_TIER_VERSION` has moved on since — already failed to run the drone. Lazily
-  // initialised so the check runs once, on mount, rather than on every render.
-  const [perfDegraded, setPerfDegraded] = useState(() => readLowVerdict() !== null);
   const handleDegrade = useCallback(() => {
-    persistLowVerdict();
-    setPerfDegraded(true);
-  }, []);
+    // Already lite (by capability or by an earlier verdict): nothing cheaper to fall back to, and
+    // the drone stays visible and flying.
+    if (profile === 'lite') return;
+    persistLiteVerdict();
+    setPerfLite(true);
+  }, [profile]);
   // A lost WebGL context is not a performance measurement (see `SceneCanvas`'s comment on
-  // `handleContextLost`) — it degrades this session only, never the persisted 30-day verdict.
+  // `handleContextLost`) — it hides the drone for this session only, never the persisted verdict.
+  const [contextLost, setContextLost] = useState(false);
   const handleContextLost = useCallback(() => {
-    setPerfDegraded(true);
+    setContextLost(true);
   }, []);
 
-  const mountable = eligible && !perfDegraded && (!paused || everMounted.current);
+  const mountable = eligible && !contextLost && (!paused || everMounted.current);
   useEffect(() => {
     if (mountable) everMounted.current = true;
   }, [mountable]);
@@ -775,7 +787,10 @@ export function DroneScene() {
   // on screen, just motionless.
   const visuallyActive = mountable && visible && documentVisible;
   const running = visuallyActive && !paused;
-  const canvasReady = useDeferredCanvasMount(profile);
+  // The idle deferral protects the initial mobile page load, so it is keyed on the capability
+  // profile only: a mid-session swap to `lite` (low FPS) must not leave the drone gone while the
+  // new canvas waits for an idle callback. The GLB is already cached by `useGLTF`.
+  const canvasReady = useDeferredCanvasMount(capabilityProfile);
 
   // A callback ref rather than `useRef` + a `useEffect` with `deps: []`: the lying first (SSR
   // hydration) render always has `mountable === false` (see the shared root cause), so the
@@ -817,8 +832,8 @@ export function DroneScene() {
     return () => window.removeEventListener('pointermove', onPointerMove);
   }, [running, profile]);
 
-  // No still stands in for the drone: under reduced motion, save-data, a failed performance
-  // verdict, or motion already paused before mount, the page simply renders without it rather
+  // No still stands in for the drone: under reduced motion, save-data, a lost WebGL
+  // context, or motion already paused before mount, the page simply renders without it rather
   // than dropping a decorative photo over the copy.
   if (!mountable) return null;
 
@@ -830,7 +845,10 @@ export function DroneScene() {
       aria-label="Dron 3D interactivo"
     >
       {canvasReady && (
+        // Keyed on the profile: `gl` and `shadows` are fixed when the WebGL context is created, so a
+        // profile change has to remount the canvas.
         <SceneCanvas
+          key={profile}
           active={running}
           pointer={pointer}
           profile={profile}
