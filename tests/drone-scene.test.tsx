@@ -513,6 +513,25 @@ describe('DroneScene — measured performance degradation', () => {
     expect(typeof stored.at).toBe('number');
   });
 
+  it('keeps desktop flight choreography after the render quality falls back to lite', () => {
+    motion.tier = 'full';
+    const querySelectorSpy = vi.spyOn(document, 'querySelector');
+    render(<DroneScene />);
+    expect(querySelectorSpy).toHaveBeenCalledWith('#contacto');
+    querySelectorSpy.mockClear();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'false');
+    expect(querySelectorSpy).toHaveBeenCalledWith('#contacto');
+    expect(querySelectorSpy).not.toHaveBeenCalledWith('.footer-top');
+  });
+
   it('keeps the drone mounted when the monitor falls back again while already lite', () => {
     const idleCallback = vi.fn((callback: IdleRequestCallback) => {
       callback({ didTimeout: false, timeRemaining: () => 0 });
