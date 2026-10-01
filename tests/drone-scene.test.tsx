@@ -465,9 +465,9 @@ describe('DroneScene — lite (mobile) tier', () => {
 
 // Phase 5: `useDetectGPU`-style device lookups were rejected (see the plan) in favour of actually
 // measuring the running session — drei's `PerformanceMonitor` samples real frame times, and a
-// lost WebGL context is treated the same way. Either path unmounts the scene entirely (not just
-// dropping to a cheaper tier) and remembers the verdict so the next visit does not pay for the
-// GLB fetch and a WebGL context just to fail again.
+// lost WebGL context is treated as its catastrophic version. A low-FPS fallback degrades the scene
+// to the lite profile (the drone stays visible) and remembers that for the next visit; a lost
+// context hides the drone for the current session only.
 describe('DroneScene — measured performance degradation', () => {
   const DRONE_TIER_KEY = 'aele:drone-tier';
   const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
@@ -490,10 +490,11 @@ describe('DroneScene — measured performance degradation', () => {
     expect(performanceMonitor.flipflops).toBe(0);
   });
 
-  it('unmounts and persists a low verdict when the performance monitor falls back after warm-up', () => {
+  it('keeps the drone mounted, degrades to the lite profile and persists a lite verdict when the monitor falls back after warm-up', () => {
     motion.tier = 'full';
     render(<DroneScene />);
-    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'true');
+    const fullCanvas = screen.getByTestId('drone-canvas');
 
     act(() => {
       vi.advanceTimersByTime(1500);
@@ -502,10 +503,38 @@ describe('DroneScene — measured performance degradation', () => {
       performanceMonitor.onFallback?.({});
     });
 
-    expect(screen.queryByTestId('drone-canvas')).not.toBeInTheDocument();
+    // The drone is never removed: the canvas is remounted on the cheaper profile (WebGL context
+    // options are fixed at creation), without waiting on the idle deferral used for initial mount.
+    const liteCanvas = screen.getByTestId('drone-canvas');
+    expect(liteCanvas).toHaveAttribute('data-shadows', 'false');
+    expect(liteCanvas).not.toBe(fullCanvas);
     const stored = JSON.parse(window.localStorage.getItem(DRONE_TIER_KEY) ?? 'null');
-    expect(stored).toMatchObject({ v: 1, verdict: 'low' });
+    expect(stored).toMatchObject({ v: 2, verdict: 'lite' });
     expect(typeof stored.at).toBe('number');
+  });
+
+  it('keeps the drone mounted when the monitor falls back again while already lite', () => {
+    const idleCallback = vi.fn((callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 0 });
+      return 1;
+    });
+    (window as unknown as { requestIdleCallback: typeof idleCallback }).requestIdleCallback = idleCallback;
+    motion.tier = 'lite';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'false');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+    act(() => {
+      performanceMonitor.onFallback?.({});
+    });
+
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'false');
+    delete (window as unknown as { requestIdleCallback?: unknown }).requestIdleCallback;
   });
 
   it('ignores a fallback fired before the warm-up grace period elapses', () => {
@@ -525,27 +554,34 @@ describe('DroneScene — measured performance degradation', () => {
     expect(window.localStorage.getItem(DRONE_TIER_KEY)).toBeNull();
   });
 
-  it('never mounts when a low verdict was already persisted', () => {
-    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 1, verdict: 'low', at: Date.now() }));
+  it('starts in the lite profile, still visible, when a lite verdict was already persisted', () => {
+    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 2, verdict: 'lite', at: Date.now() }));
     motion.tier = 'full';
-    const { container } = render(<DroneScene />);
-    expect(container).toBeEmptyDOMElement();
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'false');
   });
 
-  it('ignores an expired low verdict', () => {
+  it('ignores a legacy v1 low verdict so the drone comes back for affected visitors', () => {
+    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 1, verdict: 'low', at: Date.now() }));
+    motion.tier = 'full';
+    render(<DroneScene />);
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'true');
+  });
+
+  it('ignores an expired lite verdict', () => {
     window.localStorage.setItem(
       DRONE_TIER_KEY,
-      JSON.stringify({ v: 1, verdict: 'low', at: Date.now() - THIRTY_ONE_DAYS_MS }),
+      JSON.stringify({ v: 2, verdict: 'lite', at: Date.now() - THIRTY_ONE_DAYS_MS }),
     );
     motion.tier = 'full';
     render(<DroneScene />);
-    expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('drone-canvas')).toHaveAttribute('data-shadows', 'true');
   });
 
-  it('ignores a low verdict stored under an older scene cost version', () => {
+  it('ignores a lite verdict stored under an older scene cost version', () => {
     // `v` is bumped whenever the scene itself gets more expensive to render (new geometry,
     // shadows, materials) — an old verdict measured against a cheaper scene should not survive.
-    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 0, verdict: 'low', at: Date.now() }));
+    window.localStorage.setItem(DRONE_TIER_KEY, JSON.stringify({ v: 1, verdict: 'lite', at: Date.now() }));
     motion.tier = 'full';
     render(<DroneScene />);
     expect(screen.getByTestId('drone-canvas')).toBeInTheDocument();
