@@ -4,7 +4,7 @@ import {describe,it,expect,vi,afterEach,beforeEach} from 'vitest';
 import {MotionProvider,STORAGE_KEY} from '../components/motion-context';
 import {HeroVideo} from '../components/hero-video';
 import {ScrollStory} from '../components/scroll-story';
-import {frameIndex} from '../lib/scroll';
+import {frameBlend} from '../lib/scroll';
 function mediaQuery(reduced:boolean,desktop:boolean){vi.mocked(window.matchMedia).mockImplementation(query=>({matches:query.includes('prefers-reduced')?reduced:desktop,media:query,onchange:null,addEventListener:vi.fn(),removeEventListener:vi.fn(),addListener:vi.fn(),removeListener:vi.fn(),dispatchEvent:vi.fn()}));}
 // `navigator.connection` does not exist in jsdom by default (matching real Safari, which never
 // implements it either) — tests that need it define it here and must delete it afterwards so it
@@ -28,7 +28,7 @@ beforeEach(resetMotionPreference);
 afterEach(()=>vi.clearAllMocks());
 describe('motion and data safeguards',()=>{
  afterEach(deleteConnection);
- it('clamps scroll frames to existing assets',()=>{expect(frameIndex(-1)).toBe(0);expect(frameIndex(.5)).toBe(22);expect(frameIndex(2)).toBe(44);expect(frameIndex(NaN)).toBe(0);});
+ it('clamps scroll frames to existing assets',()=>{expect(frameBlend(-1).from).toBe(0);expect(frameBlend(.5).from).toBe(22);expect(frameBlend(2).from).toBe(44);expect(frameBlend(NaN).from).toBe(0);});
  // Superseded by "hero video network gate" below: the video used to be gated on `desktop`, so
  // mobile never autoplayed regardless of network. The real cost is the download (5.7MB, or 11MB at desktop 1080p), not CPU
  // (decode is hardware-accelerated on any phone), so the gate is network quality now, not viewport

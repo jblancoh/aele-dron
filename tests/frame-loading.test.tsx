@@ -39,4 +39,33 @@ describe('frame network scheduling',()=>{
   expect(loaded).toHaveLength(5);
   act(()=>intersection([{isIntersecting:true}]));expect(loaded).toHaveLength(10);
  });
+
+ it('eases toward the scroll target and crossfades neighbouring frames',async()=>{
+  let intersection:(entries:{isIntersecting:boolean}[])=>void=()=>{};
+  vi.stubGlobal('IntersectionObserver',class{constructor(callback:typeof intersection){intersection=callback;}observe(){}disconnect(){}});
+  const images:{onload:()=>void;src:string}[]=[];
+  vi.stubGlobal('Image',class{onload=()=>{};src='';constructor(){images.push(this);}});
+  const callbacks:FrameRequestCallback[]=[];let now=0;
+  vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{callbacks.push(callback);return callbacks.length;});
+  vi.stubGlobal('cancelAnimationFrame',()=>{});
+  const flush=()=>{now+=16;const pending=callbacks.splice(0);pending.forEach(callback=>callback(now));};
+  const draws:{src:string;alpha:number}[]=[];
+  const context={globalAlpha:1,drawImage(image:{src:string}){draws.push({src:image.src,alpha:context.globalAlpha});}};
+  vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  let top=0;
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(()=>({top,height:2000+window.innerHeight} as DOMRect));
+  const {container}=render(<ScrollStory/>);
+  act(()=>intersection([{isIntersecting:true}]));
+  await act(async()=>{images.forEach(image=>image.onload());await Promise.resolve();});
+  act(()=>flush());
+  draws.length=0;
+  top=-(2000*0.5/44);
+  act(()=>{window.dispatchEvent(new Event('scroll'));flush();});
+  // The first eased step stays between frame 1 and frame 2 rather than jumping to the target.
+  expect(draws.map(draw=>draw.src)).toEqual([frameSrc(0),frameSrc(1)]);
+  expect(draws[1].alpha).toBeGreaterThan(0);expect(draws[1].alpha).toBeLessThan(0.5);
+  for(let step=0;step<60;step++)act(()=>flush());
+  expect(draws.at(-1)).toEqual({src:frameSrc(1),alpha:0.5});
+  expect(container.querySelector('.story-progress i')?.getAttribute('style')).toContain('scaleX(0.02');
+ });
 });
