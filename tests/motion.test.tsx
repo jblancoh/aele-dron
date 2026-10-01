@@ -58,6 +58,28 @@ describe('responsive media policy',()=>{
   desktop=false;const {act}=await import('@testing-library/react');act(()=>listeners.get('(min-width: 701px)')?.());
   expect(container.querySelector('video')).toHaveAttribute('src','/media/aele-hero-1080.mp4');
  });
+
+ it('responds when DevTools toggles prefers-reduced-motion through the legacy media-query API',async()=>{
+  let reduced=false;
+  let reducedListener:(()=>void)|undefined;
+  vi.mocked(window.matchMedia).mockImplementation(query=>({
+   get matches(){return query.includes('prefers-reduced-motion')?reduced:true;},
+   media:query,
+   onchange:null,
+   addEventListener:undefined,
+   removeEventListener:undefined,
+   addListener:(listener:()=>void)=>{if(query.includes('prefers-reduced-motion')) reducedListener=listener;},
+   removeListener:vi.fn(),
+   dispatchEvent:vi.fn(),
+  } as unknown as MediaQueryList));
+  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
+  expect(container.querySelector('video')).not.toBeNull();
+
+  reduced=true;
+  const {act}=await import('@testing-library/react');
+  act(()=>reducedListener?.());
+  await waitFor(()=>expect(container.querySelector('video')).toBeNull());
+ });
 });
 
 // The video used to be gated on `desktop` (a viewport check); the real cost is the download
@@ -77,6 +99,17 @@ describe('hero video network gate',()=>{
 
  it.each(['slow-2g','2g','3g'])('does not autoplay on a %s connection',(effectiveType)=>{
   mockConnection({effectiveType});
+  mediaQuery(false,true);
+  const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
+  expect(container.querySelector('video')).toBeNull();
+  expect(screen.getByRole('button',{name:'Reproducir video de fondo'})).toBeInTheDocument();
+ });
+
+ it('keeps the poster under Chrome DevTools Slow 4G when the browser reports effectiveType=3g',()=>{
+  // Chrome's Slow 4G preset reports the constrained 3g effective type to the page. The gate must
+  // follow that browser signal instead of assuming every named 4G preset is safe for the 2.4 MB
+  // hero video.
+  mockConnection({effectiveType:'3g'});
   mediaQuery(false,true);
   const {container}=render(<MotionProvider><HeroVideo/></MotionProvider>);
   expect(container.querySelector('video')).toBeNull();

@@ -67,6 +67,32 @@ describe('MotionProvider preference persistence', () => {
     expect(screen.getByTestId('preference')).toHaveTextContent('off');
   });
 
+  it('restores a paused preference after a module reload, like a full page refresh', async () => {
+    const first = await loadMotionContext();
+    const FirstProbe = makeProbe(first.useMotion);
+    const { unmount } = render(
+      <first.MotionProvider>
+        <FirstProbe />
+      </first.MotionProvider>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Pausar' }));
+    expect(window.localStorage.getItem(first.STORAGE_KEY)).toBe('off');
+    unmount();
+
+    // A browser reload creates a fresh module instance; localStorage is the only state that may
+    // carry the pause across it. This also catches implementations that only preserve React
+    // state or a module-level cache in the current document.
+    vi.resetModules();
+    const second = await loadMotionContext();
+    const SecondProbe = makeProbe(second.useMotion);
+    render(
+      <second.MotionProvider>
+        <SecondProbe />
+      </second.MotionProvider>,
+    );
+    expect(screen.getByTestId('preference')).toHaveTextContent('off');
+  });
+
   it('writes nothing to storage until the visitor acts', async () => {
     const { MotionProvider, useMotion } = await loadMotionContext();
     const Probe = makeProbe(useMotion);
