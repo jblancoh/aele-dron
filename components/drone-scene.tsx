@@ -437,7 +437,15 @@ function findNode(scene: Object3D, name: string) {
 
 type PointerRef = { current: { x: number; y: number } };
 
-function DroneModel({ pointer, profile }: { pointer: PointerRef; profile: DroneProfile }) {
+function DroneModel({
+  pointer,
+  profile,
+  flightProfile,
+}: {
+  pointer: PointerRef;
+  profile: DroneProfile;
+  flightProfile: DroneProfile;
+}) {
   const { scene } = useGLTF(MODEL_URL);
   const { viewport, size } = useThree();
   const maxScroll = useRef(1);
@@ -477,9 +485,9 @@ function DroneModel({ pointer, profile }: { pointer: PointerRef; profile: DroneP
   }, [scene, profile]);
 
   useEffect(() => {
-    // Both profiles fly the scroll now, just over different stop lists — see `MOBILE_FLIGHT_STOPS`
-    // for why mobile needs its own set rather than reusing `FLIGHT_STOPS`.
-    const activeStops = profile === 'lite' ? MOBILE_FLIGHT_STOPS : FLIGHT_STOPS;
+    // Choreography follows device capability, not render quality: a desktop that degrades to the
+    // lite WebGL profile still has the desktop viewport and must keep its route and scale.
+    const activeStops = flightProfile === 'lite' ? MOBILE_FLIGHT_STOPS : FLIGHT_STOPS;
     const measure = (selector: string) => {
       const element = document.querySelector(selector);
       if (!element) return null;
@@ -520,7 +528,7 @@ function DroneModel({ pointer, profile }: { pointer: PointerRef; profile: DroneP
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', remeasure);
     };
-  }, [profile]);
+  }, [flightProfile]);
 
   useFrame((_state, delta) => {
     const root = nodes.root;
@@ -564,12 +572,14 @@ function SceneCanvas({
   active,
   pointer,
   profile,
+  flightProfile,
   onDegrade,
   onContextLost,
 }: {
   active: boolean;
   pointer: PointerRef;
   profile: DroneProfile;
+  flightProfile: DroneProfile;
   onDegrade: () => void;
   onContextLost: () => void;
 }) {
@@ -662,7 +672,7 @@ function SceneCanvas({
         <AdaptiveDpr />
         <AdaptiveEvents />
         <Suspense fallback={null}>
-          <DroneModel pointer={pointer} profile={profile} />
+          <DroneModel pointer={pointer} profile={profile} flightProfile={flightProfile} />
         </Suspense>
       </PerformanceMonitor>
     </Canvas>
@@ -852,6 +862,7 @@ export function DroneScene() {
           active={running}
           pointer={pointer}
           profile={profile}
+          flightProfile={capabilityProfile}
           onDegrade={handleDegrade}
           onContextLost={handleContextLost}
         />
