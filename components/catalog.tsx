@@ -14,10 +14,10 @@ function Film({item,index}:{item:PortfolioItem;index:number}){
     <span className="film-play"><Play size={18} fill="currentColor"/><span>VER VIDEO</span></span>
     <span className="film-image-caption">{item.category}<ArrowUpRight size={22}/></span>
    </DialogTrigger>
-   <DialogContent className="film-dialog" showCloseButton={false}>
+   <DialogContent className={`film-dialog${item.aspect==='portrait'?' film-dialog-portrait':''}`} showCloseButton={false}>
     <div className="player-heading"><DialogTitle>{item.title}</DialogTitle><DialogClose className="icon-button" aria-label="Cerrar video"><X size={23}/></DialogClose></div>
     <DialogDescription>{item.description}</DialogDescription>
-    {open&&(failed?<div className="player-error"><img src={item.poster} alt="Vista previa del video"/><p role="alert">No pudimos cargar el video. Puedes intentarlo de nuevo.</p><button className="pill" onClick={()=>{setAttempt(n=>n+1);setFailed(false);}}>Reintentar</button></div>:<video key={attempt} className="catalog-video" src={item.video} poster={item.poster} muted playsInline controls preload="metadata" aria-label={item.title} onError={()=>setFailed(true)}/>)}
+    {open&&(failed?<div className="player-error"><img src={item.poster} alt="Vista previa del video"/><p role="alert">No pudimos cargar el video. Puedes intentarlo de nuevo.</p><button className="pill" onClick={()=>{setAttempt(n=>n+1);setFailed(false);}}>Reintentar</button></div>:<video key={attempt} className={`catalog-video${item.aspect==='portrait'?' catalog-video-portrait':''}`} src={item.video} poster={item.poster} muted playsInline controls preload="metadata" aria-label={item.title} onError={()=>setFailed(true)}/>)}
    </DialogContent>
   </Dialog>
   <div className="film-caption"><div><h3>{item.title}</h3><p>{item.description}</p></div><span>0{index+1} / 0{portfolio.length}</span></div>
