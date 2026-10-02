@@ -2,8 +2,9 @@ export const site = {
   name: 'aele·dron',
   location: 'Villahermosa, Tabasco',
   instagram: 'https://www.instagram.com/aele.dron/',
-  // Set the company's real international number before commercial launch.
-  whatsappNumber: '',
+  socialHandle: '@aele.dron',
+  email: 'aele.studio21@gmail.com',
+  whatsappNumber: '+52 9931296802',
 };
 export type PortfolioItem = {
   id: string; title: string; category: string; description: string;
