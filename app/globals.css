@@ -41,7 +41,7 @@
    happen is no-drone -> drone, never the reverse mid-render — a fade rather than a pop. */
 .drone-scene{position:fixed;z-index:2;inset:0;width:100vw;height:100vh;pointer-events:none;opacity:0;transition:opacity .35s;isolation:isolate}
 .drone-scene[data-active="true"]{opacity:1}
-.drone-canvas{width:100%!important;height:100%!important;background:transparent!important}
+.drone-canvas{width:100%!important;height:100%!important;background:transparent!important;pointer-events:none!important}
 .hero-copy{z-index:3;max-width:40vw}
 @media(max-width:700px){.hero-copy{max-width:none}}
 @media(min-width:701px){

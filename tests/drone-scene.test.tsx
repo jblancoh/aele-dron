@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGLTF } from '@react-three/drei';
@@ -110,6 +111,15 @@ afterEach(() => {
 });
 
 describe('DroneScene', () => {
+  it('keeps canvas hit-testing transparent so page controls remain clickable', () => {
+    const stylesheet = readFileSync('app/globals.css', 'utf8');
+    const canvasRule = stylesheet.match(/\.drone-canvas\s*\{([^}]*)\}/)?.[1] ?? '';
+
+    // R3F can set pointer-events:auto inline on its canvas wrapper, so this declaration must use
+    // !important to keep the full-screen visual layer from intercepting page controls.
+    expect(canvasRule).toMatch(/pointer-events\s*:\s*none\s*!important/i);
+  });
+
   it('loads the approved white drone asset on eligible devices', () => {
     motion.tier = 'full';
     render(<DroneScene />);
