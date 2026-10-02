@@ -2,6 +2,7 @@ export const site = {
   name: 'aele·dron',
   location: 'Villahermosa, Tabasco',
   instagram: 'https://www.instagram.com/aele.dron/',
+  tiktok: 'https://www.tiktok.com/@aele.dron',
   socialHandle: '@aele.dron',
   email: 'aele.studio21@gmail.com',
   whatsappNumber: '+52 9931296802',

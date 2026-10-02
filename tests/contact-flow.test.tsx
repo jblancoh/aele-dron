@@ -15,8 +15,10 @@ describe('guided contact',()=>{
 		const whatsapp=screen.getByRole('link',{name:/Abrir WhatsApp/});
 		expect(whatsapp).toHaveAttribute('href',expect.stringContaining('https://wa.me/529931296802?text='));
 		expect(new URL(whatsapp.getAttribute('href')!).searchParams.get('text')).toContain('Evento: Boda');
-		expect(screen.getByText('+52 993 129 6802')).toBeInTheDocument();
-		expect(screen.getByRole('link',{name:'aele.studio21@gmail.com'})).toHaveAttribute('href','mailto:aele.studio21@gmail.com');
-		expect(screen.getByRole('link',{name:/@aele\.dron/})).toHaveAttribute('href','https://www.instagram.com/aele.dron/');
+		expect(screen.queryByText(/993\s?129\s?6802/)).not.toBeInTheDocument();
+		expect(screen.queryByRole('link',{name:'aele.studio21@gmail.com'})).not.toBeInTheDocument();
+		expect(screen.queryByRole('link',{name:/mailto:/})).not.toBeInTheDocument();
+		expect(screen.getByRole('link',{name:/Instagram @aele\.dron/})).toHaveAttribute('href','https://www.instagram.com/aele.dron/');
+		expect(screen.getByRole('link',{name:/TikTok @aele\.dron/})).toHaveAttribute('href','https://www.tiktok.com/@aele.dron');
 	});
 });

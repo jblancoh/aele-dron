@@ -28,9 +28,8 @@ export function Contact(){
     {step===2&&<><p className="form-help">Este es el mensaje que prepararemos para AELE.</p><dl className="inquiry-summary"><div><dt>EVENTO</dt><dd>{inquiry.eventType}</dd></div><div><dt>FECHA</dt><dd>{inquiry.dateUndecided?'Por definir':formatDate(inquiry.date)}</dd></div><div><dt>LUGAR</dt><dd>{inquiry.location.trim()}</dd></div></dl>{url?<><a className="pill pill-white continue" href={url} target="_blank" rel="noreferrer">Abrir WhatsApp <ArrowUpRight size={17}/></a><p className="privacy-note">Se abrirá WhatsApp. Tú revisas y envías el mensaje; no se envía automáticamente.</p></>:<div className="contact-pending"><strong>WhatsApp pendiente de configurar</strong><p>Mientras tanto, puedes escribirnos por Instagram. No hemos enviado ni guardado tus datos.</p><a className="text-link" href={site.instagram} target="_blank" rel="noreferrer">Escribir a @aele.dron <ArrowUpRight size={16}/></a></div>}<button type="button" className="back-button" onClick={()=>move(1)}><ArrowLeft size={17}/>Editar detalles</button></>}
    </form>
    <div className="contact-methods" aria-label="Otros medios de contacto">
-    <p>WhatsApp: <span>{site.whatsappNumber.replace(/^\+52\s?(\d{3})(\d{3})(\d{4})$/, '+52 $1 $2 $3')}</span></p>
-    <a className="text-link" href={`mailto:${site.email}`}>{site.email}</a>
     <a className="text-link" href={site.instagram} target="_blank" rel="noreferrer">Instagram {site.socialHandle} <ArrowUpRight size={16}/></a>
+    <a className="text-link" href={site.tiktok} target="_blank" rel="noreferrer">TikTok {site.socialHandle} <ArrowUpRight size={16}/></a>
    </div>
    <p className="privacy-note form-privacy">Sin compromisos. Solo el comienzo de algo increíble.</p>
   </div>
