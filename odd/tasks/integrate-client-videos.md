@@ -73,7 +73,7 @@ No other page, unrelated media, remote service, or feature is authorized. Do not
 - [x] Run offline dependency setup first; package fetching is prohibited except for the explicitly user-authorized single package from the exact registry recorded below.
 - [x] Run focused catalog tests and `npm run typecheck`; record exact outcomes.
 - [x] Run `npm run lint`; record the observed unchanged-file error.
-- [ ] Commit this work unit with a Conventional Commit message and record its commit identity here.
+- [x] Commit this work unit with a Conventional Commit message and record its commit identity here.
 
 **Authorized scope:** `components/catalog.tsx`, `app/globals.css`, `tests/catalog.test.tsx`, and this task document / its Engram mirror. Apply immersive playback only to catalog items with `aspect: 'portrait'`; no public API changes, Fullscreen API, or unrelated edits. The user separately authorized only `@testing-library/dom@10.4.2` from `https://registry.npmjs.org`, without additional credentials and without changing package manifests/lockfile; no other remote operation is authorized.
 
@@ -85,14 +85,14 @@ No other page, unrelated media, remote service, or feature is authorized. Do not
 
 **Verification:** RED — `npm test -- tests/catalog.test.tsx`: 5 tests; 4 passed and the new portrait assertion failed because `film-dialog-portrait` was absent. GREEN — `npm test -- tests/catalog.test.tsx`: 1 file, 5 tests passed; `npm run typecheck`: passed. `npm run lint`: failed with `components/drone-scene.tsx:641:31: error typescript(no-deprecated): PCFSoftShadowMap is deprecated.` `components/drone-scene.tsx` is unchanged and outside VID-3 scope; do not modify it to clear lint. Existing task history records the earlier four `react-compiler` errors in unchanged `components/hero-video.tsx`; neither file is changed here. Package install audit output reported 10 vulnerabilities; no audit remediation was authorized.
 
-**Commit:** pending.
+**Commit:** `881b484` — `feat(catalog): add immersive mobile portrait playback`.
 
 ## Progress and Verification
 
 - **TDD mode:** strict; source: `AGENTS.md`.
 - **Test runner/checks:** `npm test`; `npm run typecheck`; `npm run lint` (applicable checks per work unit).
 - **Current progress:** VID-1 implementation, verification, and work-unit commit are complete. VID-2 behavior, media, tests, typecheck, and work-unit commit are complete; lint remains blocked by the known errors in unchanged `components/hero-video.tsx`, so VID-2 remains partial pending resolution of that baseline check.
-- **VID-3 progress:** mobile-only portrait dialog styling and regression coverage are implemented. Focused tests (5/5) and typecheck pass; lint is blocked by an unchanged deprecated API usage in `components/drone-scene.tsx:641`. No package.json/package-lock changes. Commit pending. Current branch: `jblancoh/vertical-video-mobile`.
+- **VID-3 progress:** mobile-only portrait dialog styling and regression coverage are implemented and committed as `881b484`. Focused tests (5/5) and typecheck pass; lint is blocked by an unchanged deprecated API usage in `components/drone-scene.tsx:641`. No package.json/package-lock changes. Current branch: `jblancoh/vertical-video-mobile`.
 - **Verification evidence:** see VID-1 for observed RED/GREEN outcomes and check results. `npm ci` required `--legacy-peer-deps` for the existing Vite 8/Tailwind peer range; Vitest's existing setup also required the missing `@testing-library/dom` package locally (installed with `--no-save`, not added to project manifests).
 - **Commits:** VID-1 `b9c51d3`; VID-2 `05b9249`.
 - **Next step:** resolve the pre-existing lint errors in `components/hero-video.tsx` or have the project owner accept them as a baseline exception before closing the feature.
