@@ -1,9 +1,19 @@
+import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { transform } from 'lightningcss';
 import { describe,it,expect } from 'vitest';
 import { Catalog } from '../components/catalog';
 import { portfolio } from '../lib/site-content';
 describe('catalog player',()=>{
+ it('preserves the mobile dialog translation reset after CSS minification',()=>{
+  const source=readFileSync('app/globals.css','utf8');
+  const rule=source.match(/\.film-dialog-portrait\[data-slot=dialog-content\]\{([^}]*)\}/)?.[1];
+  expect(rule).toBeDefined();
+  const css=`@layer utilities{.film-dialog-portrait[data-slot=dialog-content]{translate:-50% -50%}}.film-dialog-portrait[data-slot=dialog-content]{${rule}}`;
+  const compiled=transform({filename:'catalog.css',code:Buffer.from(css)}).code.toString();
+  expect(compiled).toMatch(/translate:\s*0(?:px)?(?:\s+0(?:px)?)?\s*!important/);
+ });
  it('shows the supplied client videos in the requested order with local browser-friendly media',()=>{
   expect(portfolio.map(({title,video,poster})=>({title,video,poster}))).toEqual([
    {title:'JAC Veracruz',video:'/media/jac-veracruz.mp4',poster:'/media/jac-veracruz-poster.jpg'},

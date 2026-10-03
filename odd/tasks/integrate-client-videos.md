@@ -89,6 +89,31 @@ No other page, unrelated media, remote service, or feature is authorized. Do not
 
 ## Progress and Verification
 
+### VID-4 — Correct clipped mobile portrait playback
+
+- [x] Reproduce the mobile positioning failure in generated production CSS and observe a failing minifier regression before source changes.
+- [x] Fix the confirmed cause while retaining uncropped portrait playback, accessible close/focus behavior, and unchanged desktop/horizontal playback.
+- [x] Run focused and full tests, typecheck, lint, and rendered mobile/desktop layout checks; record baseline lint failure below.
+- [ ] Commit the verified work unit locally with a Conventional Commit; record commit and native review status.
+
+**Authorized scope:** catalog playback, its styles, directly supporting regression tests, and this document/mirror. User approved this correction on 2026-10-02. No dependency fetching, push, PR, deployment, or remote credentials are authorized. Offline dependency setup is allowed; stop if required tools cannot be made available locally.
+
+**Route:** delegated direct, because reproducing the geometry failure and implementing regression coverage requires multi-file preparation and execution. One bounded writer owns the fix; preserve all historical VID-1/VID-2/VID-3 evidence.
+
+**Acceptance:** at mobile portrait sizes the complete player and close affordance are visible within the viewport, video is uncropped at its native aspect ratio, and desktop/horizontal playback is unchanged. Verify rendered geometry where tools are available, not only class names.
+
+**TDD:** strict, from the current AGENTS.md/session configuration. Runner: `npm test`; required checks: `npm test -- tests/catalog.test.tsx`, `npm test`, `npm run typecheck`, `npm run lint`, `git diff --check`. Run source-mutating normalization before final verification/review only, preserving the existing compact style and avoiding unrelated churn.
+
+**Delivery:** existing feature identity reused. Current correction branch: `jblancoh/fix-mobile-vertical-video`; boundary before VID-4 is `5fec163`. Correction forecast: 80–200 authored changed lines; delivery strategy `ask-on-risk`. Keep this correction as one coherent local work-unit commit with tests and documentation. Rollback boundary is the VID-4 playback/test changes, not earlier video integration.
+
+**Root cause and fix:** the source mobile rule already reset the legacy `transform` and individual `translate`, but the production Lightning CSS pipeline removed `translate:none!important` when it also saw `transform:none!important`. Tailwind's dialog utilities still emitted `translate:-50% -50%`, so the full-viewport mobile dialog was shifted by half its own width and height toward the upper-left. The regression test composes the production utility declaration and source mobile rule, runs the installed Lightning CSS optimizer, and asserts the individual translate reset survives. `npm test -- tests/catalog.test.tsx` was RED before the source edit: the minified output retained `translate:-50% -50%`. The fix uses `translate:0 0!important` and removes the redundant `transform:none!important`; the optimizer preserves the reset and the existing open/close transform animation is not disabled.
+
+**Rendered production QA:** rebuilt with `npm run build:vercel` and served only the local `.vercel/output` in headless Chrome using an isolated temporary profile/CDP. Chrome device emulation used `mobile:true`, DPR 3, and 390×844, 375×667, and 844×390; desktop 1440×900 used `mobile:false`, DPR 1. At 390×844 the settled portrait dialog bounds are (0, 0)–(390, 844), video (18, 155.3)–(372, 784.7), and close control (328, 59.3)–(372, 103.3). At 375×667, dialog bounds are (0, 0)–(375, 667), video (53.3, 143)–(321.7, 620), and close control (313, 47)–(357, 91). At 390×700 after viewport resize, the video is (51.6, 143)–(338.4, 653) and close control (328, 47)–(372, 91). The 390×844 opening animation was inside bounds immediately and at 100/500 ms. Portrait video retained native 720×1280 dimensions, `object-fit:contain`, controls, and `playsinline`. Mobile landscape wide playback and desktop portrait playback remain centered/in-bounds; Escape closes and restores focus to the trigger. These are Chromium emulation results, not actual iPhone/WebKit validation.
+
+**Verification:** RED — focused minifier regression failed before source changes. GREEN — `npm test -- tests/catalog.test.tsx`: 6 passed; `npm test`: 12 files / 178 tests passed; `npm run typecheck`: passed. `npm run lint`: fails on the existing unrelated `components/drone-scene.tsx:641:31` deprecated `PCFSoftShadowMap` API; file is unchanged. `git diff --check`: passed. The production build succeeded and the geometry above was measured against its generated CSS. No package manifest or lockfile changes. Parent structural readback and focused spot-check passed. Native preliminary assessment: medium risk, 37 lines, under budget; final committed assessment is pending.
+
+**Next step:** create the authorized local work-unit commit, record its hash, then obtain the parent-owned final committed assessment. Chrome emulation verifies the production CSS fix; iOS/WebKit still requires validation on an actual iPhone if device-specific confirmation is desired.
+
 - **TDD mode:** strict; source: `AGENTS.md`.
 - **Test runner/checks:** `npm test`; `npm run typecheck`; `npm run lint` (applicable checks per work unit).
 - **Current progress:** VID-1 implementation, verification, and work-unit commit are complete. VID-2 behavior, media, tests, typecheck, and work-unit commit are complete; lint remains blocked by the known errors in unchanged `components/hero-video.tsx`, so VID-2 remains partial pending resolution of that baseline check.
